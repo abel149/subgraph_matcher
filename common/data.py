@@ -70,143 +70,106 @@ def load_dataset(name):
     return train, test, task
 
 class DataSource:
-    def gen_batch(batch_target, batch_neg_target, batch_neg_query, train):
+    def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
         raise NotImplementedError
 
-class OTFSynDataSource(DataSource):
-    """ On-the-fly generated synthetic data for training the subgraph model.
+    
+import pickle
+import random
+import networkx as nx
+import torch
+from torch.utils.data import DataLoader as TorchDataLoader
+from deep_snap import DSGraph
+from batch import Batch
+import feature_preprocess
+import utils
 
-    At every iteration, new batch of graphs (positive and negative) are generated
-    with a pre-defined generator (see combined_syn.py).
+class OTFSynDataSource:
+    """Modified OTFSynDataSource to use your own target graph (.pkl) and
+    generate query subgraphs on-the-fly for training."""
 
-    DeepSNAP transforms are used to generate the positive and negative examples.
-    """
-    def __init__(self, max_size=29, min_size=5, n_workers=4,
-        max_queue_size=256, node_anchored=False):
-        self.closed = False
+    def __init__(self, target_pkl_path, max_size=29, min_size=5, node_anchored=False):
         self.max_size = max_size
         self.min_size = min_size
         self.node_anchored = node_anchored
-        self.generator = combined_syn.get_generator(np.arange(
-            self.min_size + 1, self.max_size + 1))
 
-    def gen_data_loaders(self, size, batch_size, train=True,
-        use_distributed_sampling=False):
-        loaders = []
-        for i in range(2):
-            dataset = combined_syn.get_dataset("graph", size // 2,
-                np.arange(self.min_size + 1, self.max_size + 1))
-            sampler = torch.utils.data.distributed.DistributedSampler(
-                dataset, num_replicas=hvd.size(), rank=hvd.rank()) if \
-                    use_distributed_sampling else None
-            loaders.append(TorchDataLoader(dataset,
-                collate_fn=Batch.collate([]), batch_size=batch_size // 2 if i
-                == 0 else batch_size // 2,
-                sampler=sampler, shuffle=False))
-        loaders.append([None]*(size // batch_size))
-        return loaders
+        # Load raw dict (with 'nodes' and 'edges')
+        with open(target_pkl_path, "rb") as f:
+            raw_data = pickle.load(f)
 
-    def gen_batch(self, batch_target, batch_neg_target, batch_neg_query,
-        train):
-        def sample_subgraph(graph, offset=0, use_precomp_sizes=False,
-            filter_negs=False, supersample_small_graphs=False, neg_target=None,
-            hard_neg_idxs=None):
-            if neg_target is not None: graph_idx = graph.G.graph["idx"]
-            use_hard_neg = (hard_neg_idxs is not None and graph.G.graph["idx"]
-                in hard_neg_idxs)
-            done = False
-            n_tries = 0
-            while not done:
-                if use_precomp_sizes:
-                    size = graph.G.graph["subgraph_size"]
-                else:
-                    if train and supersample_small_graphs:
-                        sizes = np.arange(self.min_size + offset,
-                            len(graph.G) + offset)
-                        ps = (sizes - self.min_size + 2) ** (-1.1)
-                        ps /= ps.sum()
-                        size = stats.rv_discrete(values=(sizes, ps)).rvs()
-                    else:
-                        d = 1 if train else 0
-                        size = random.randint(self.min_size + offset - d,
-                            len(graph.G) - 1 + offset)
-                start_node = random.choice(list(graph.G.nodes))
-                neigh = [start_node]
-                frontier = list(set(graph.G.neighbors(start_node)) - set(neigh))
-                visited = set([start_node])
-                while len(neigh) < size:
-                    new_node = random.choice(list(frontier))
-                    assert new_node not in neigh
-                    neigh.append(new_node)
-                    visited.add(new_node)
-                    frontier += list(graph.G.neighbors(new_node))
-                    frontier = [x for x in frontier if x not in visited]
-                if self.node_anchored:
-                    anchor = neigh[0]
-                    for v in graph.G.nodes:
-                        graph.G.nodes[v]["node_feature"] = (torch.ones(1) if
-                            anchor == v else torch.zeros(1))
-                        #print(v, graph.G.nodes[v]["node_feature"])
-                neigh = graph.G.subgraph(neigh)
-                if use_hard_neg and train:
-                    neigh = neigh.copy()
-                    if random.random() < 1.0 or not self.node_anchored: # add edges
-                        non_edges = list(nx.non_edges(neigh))
-                        if len(non_edges) > 0:
-                            for u, v in random.sample(non_edges, random.randint(1,
-                                min(len(non_edges), 5))):
-                                neigh.add_edge(u, v)
-                    else:                         # perturb anchor
-                        anchor = random.choice(list(neigh.nodes))
-                        for v in neigh.nodes:
-                            neigh.nodes[v]["node_feature"] = (torch.ones(1) if
-                                anchor == v else torch.zeros(1))
+        # Convert to NetworkX graph
+        self.target_graph = nx.Graph()
+        self.target_graph.add_nodes_from(raw_data["nodes"])
+        self.target_graph.add_edges_from(raw_data["edges"])
 
-                if (filter_negs and train and len(neigh) <= 6 and neg_target is
-                    not None):
-                    matcher = nx.algorithms.isomorphism.GraphMatcher(
-                        neg_target[graph_idx], neigh)
-                    if not matcher.subgraph_is_isomorphic(): done = True
-                else:
-                    done = True
+        self.nodes = list(self.target_graph.nodes())
+        self.closed = False
+    def gen_data_loaders(self, size, batch_size, train=True, use_distributed_sampling=False):
+        # We only create a dummy loader because batches are generated on-the-fly
+        dummy_loader = [None] * (size // batch_size)
+        return [dummy_loader, dummy_loader, dummy_loader]
 
-            return graph, DSGraph(neigh)
-
+    def gen_batch(self, batch_target=None, batch_neg_target=None,
+                  batch_neg_query=None, train=True, batch_size=32):
         augmenter = feature_preprocess.FeatureAugment()
 
-        pos_target = batch_target
-        pos_target, pos_query = pos_target.apply_transform_multi(sample_subgraph)
-        neg_target = batch_neg_target
-        # TODO: use hard negs
-        hard_neg_idxs = set(random.sample(range(len(neg_target.G)),
-            int(len(neg_target.G) * 1/2)))
-        #hard_neg_idxs = set()
-        batch_neg_query = Batch.from_data_list(
-            [DSGraph(self.generator.generate(size=len(g))
-                if i not in hard_neg_idxs else g)
-                for i, g in enumerate(neg_target.G)])
-        for i, g in enumerate(batch_neg_query.G):
-            g.graph["idx"] = i
-        _, neg_query = batch_neg_query.apply_transform_multi(sample_subgraph,
-            hard_neg_idxs=hard_neg_idxs)
-        if self.node_anchored:
-            def add_anchor(g, anchors=None):
-                if anchors is not None:
-                    anchor = anchors[g.G.graph["idx"]]
-                else:
-                    anchor = random.choice(list(g.G.nodes))
-                for v in g.G.nodes:
-                    if "node_feature" not in g.G.nodes[v]:
-                        g.G.nodes[v]["node_feature"] = (torch.ones(1) if anchor == v
-                            else torch.zeros(1))
-                return g
-            neg_target = neg_target.apply_transform(add_anchor)
-        pos_target = augmenter.augment(pos_target).to(utils.get_device())
-        pos_query = augmenter.augment(pos_query).to(utils.get_device())
-        neg_target = augmenter.augment(neg_target).to(utils.get_device())
-        neg_query = augmenter.augment(neg_query).to(utils.get_device())
-        #print(len(pos_target.G[0]), len(pos_query.G[0]))
-        return pos_target, pos_query, neg_target, neg_query
+        pos_targets = []
+        pos_queries = []
+        neg_targets = []
+        neg_queries = []
+
+        for _ in range(batch_size):
+            # --- Positive sample: sample query subgraph from target graph ---
+            size = random.randint(self.min_size,
+                                  min(self.max_size, len(self.nodes)))
+
+            start_node = random.choice(self.nodes)
+            neigh = [start_node]
+            frontier = list(set(self.target_graph.neighbors(start_node)) - set(neigh))
+            visited = set([start_node])
+
+            while len(neigh) < size and frontier:
+                new_node = random.choice(frontier)
+                neigh.append(new_node)
+                visited.add(new_node)
+                frontier += list(set(self.target_graph.neighbors(new_node)) - visited)
+                frontier = [x for x in frontier if x not in visited]
+
+            query_subgraph = self.target_graph.subgraph(neigh).copy()
+
+            # Add node features to query graph for anchor if needed
+            if self.node_anchored:
+                for v in query_subgraph.nodes:
+                    query_subgraph.nodes[v]['node_feature'] = (
+                        torch.ones(1) if v == start_node else torch.zeros(1)
+                    )
+
+            # Wrap graphs as DSGraph
+            target_dsgraph = DSGraph(self.target_graph)
+            query_dsgraph = DSGraph(query_subgraph)
+
+            pos_targets.append(target_dsgraph)
+            pos_queries.append(query_dsgraph)
+
+            # --- Negative sample: random graph of same size ---
+            neg_query_graph = nx.gnm_random_graph(size, max(size, 1)*2)
+            neg_query_dsgraph = DSGraph(neg_query_graph)
+            neg_targets.append(target_dsgraph)
+            neg_queries.append(neg_query_dsgraph)
+
+        # Create batches and move to device
+        pos_target_batch = Batch.from_data_list(pos_targets).to(utils.get_device())
+        pos_query_batch = Batch.from_data_list(pos_queries).to(utils.get_device())
+        neg_target_batch = Batch.from_data_list(neg_targets).to(utils.get_device())
+        neg_query_batch = Batch.from_data_list(neg_queries).to(utils.get_device())
+
+        # Augment features
+        pos_target_batch = augmenter.augment(pos_target_batch)
+        pos_query_batch = augmenter.augment(pos_query_batch)
+        neg_target_batch = augmenter.augment(neg_target_batch)
+        neg_query_batch = augmenter.augment(neg_query_batch)
+
+        return pos_target_batch, pos_query_batch, neg_target_batch, neg_query_batch
 
 class OTFSynImbalancedDataSource(OTFSynDataSource):
     """ Imbalanced on-the-fly synthetic data.

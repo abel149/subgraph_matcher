@@ -53,6 +53,8 @@ def build_model(args):
 
 def make_data_source(args):
     toks = args.dataset.split("-")
+    if args.dataset.endswith(".pkl"):
+        data_source =  data.OTFSynDataSource(args.dataset, node_anchored=args.node_anchored)
     if toks[0] == "syn":
         if len(toks) == 1 or toks[1] == "balanced":
             data_source = data.OTFSynDataSource(
@@ -158,18 +160,21 @@ def train_loop(args):
         clf_opt = None
 
     data_source = make_data_source(args)
-    loaders = data_source.gen_data_loaders(args.val_size, args.batch_size,
-        train=False, use_distributed_sampling=False)
+
     test_pts = []
-    for batch_target, batch_neg_target, batch_neg_query in zip(*loaders):
-        pos_a, pos_b, neg_a, neg_b = data_source.gen_batch(batch_target,
-            batch_neg_target, batch_neg_query, False)
-        if pos_a:
+    num_batches = args.val_size // args.batch_size
+
+    for _ in range(num_batches):
+        pos_a, pos_b, neg_a, neg_b = data_source.gen_batch(train=False, batch_size=args.batch_size)
+
+        if pos_a is not None:
             pos_a = pos_a.to(torch.device("cpu"))
             pos_b = pos_b.to(torch.device("cpu"))
+
         neg_a = neg_a.to(torch.device("cpu"))
         neg_b = neg_b.to(torch.device("cpu"))
         test_pts.append((pos_a, pos_b, neg_a, neg_b))
+
 
     workers = []
     for i in range(args.n_workers):
