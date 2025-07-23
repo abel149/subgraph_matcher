@@ -39,6 +39,10 @@ COPY requirements.txt .
 
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
+RUN pip install torch torchvision torchaudio  # match your PyTorch version and CUDA needs
+RUN pip install deepsnap networkx
+
+
 RUN pip install --no-cache-dir numpy==1.21.6
 
 RUN pip install --no-cache-dir \
