@@ -60,7 +60,7 @@ jobs:
           echo "total_cpus=$TOTAL_CPUS" >> $GITHUB_OUTPUT
           echo "percent_used=$PERCENT_USED" >> $GITHUB_OUTPUT
 
-      - name: Run decoder in Docker container
+      - name: Run matcher in Docker container
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:/app \
@@ -68,51 +68,38 @@ jobs:
             decoder-image:latest \
             bash -c "
               set -e
-              echo 'Starting decoder run...'
-              python -m subgraph_mining.decoder \
-                --dataset=metta.pkl \
-                --n_trials=50 \
-                --node_anchored \
-                --out_path=/app/results/patterns.pkl
+              echo 'Starting matcher run on synthetic data...'
+              python -m subgraph_matching.train --dataset=graph.pkl
               echo 'Checking output directories...'
-              ls -la /app/plots/cluster
               ls -la /app/results
+              ls -la /app/plots
               "
-      # - name: Run pattern counter in Docker container
-      #   run: |
-      #     docker run --rm \
-      #       -v ${{ github.workspace }}:/app \
-      #       -e PYTHONUNBUFFERED=1 \
-      #       decoder-image:latest \
-      #       bash -c "
-      #         set -e
-      #         export PYTHONPATH=/app
-      #         echo 'Running pattern counter...'
-      #         python -m analyze.count_patterns \
-      #           --dataset=graph.pkl \
-      #           --queries_path=results/patterns.pkl \
-      #           --out_path=results/ \
-      #           --node_anchored \
-      #           --preserve_labels
-      #         echo 'Counting completed.'
-      #         ls -la /app/results
-      #       "
 
-      - name: Check for generated files
+      - name: Check for matcher outputs
         run: |
-          echo "Checking plots directory:"
-          ls -R plots/ || echo "No plots directory found"
-          echo "Checking results directory:"
-          ls -R results/ || echo "No results directory found"
+          echo "Checking matcher outputs in results/ and plots/:"
+          ls -lh results/ || echo "No results directory found"
+          ls -lh plots/ || echo "No plots directory found"
 
-      - name: Upload plots as artifact
+      - name: Upload matcher outputs as artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: decoder-plots
+          name: matcher-results
           path: |
-            plots/
             results/
+            plots/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Upload trainer outputs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trainer-outputs
+          path: |
+            ckpt/
+            runs/
           retention-days: 7
           if-no-files-found: warn
 
