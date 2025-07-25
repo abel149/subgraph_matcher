@@ -104,31 +104,49 @@ class DataSource:
         raise NotImplementedError
 
 class GeneGraphDataSource:
-   def __init__(self, graph_pkl_path, node_anchored=True, num_queries=32, subgraph_hops=1):
+  def __init__(self, graph_pkl_path, node_anchored=True, num_queries=32, subgraph_hops=1):
+    import pickle
+    import torch
+    import networkx as nx
+    from deepsnap.graph import Graph as DSGraph
+
     with open(graph_pkl_path, "rb") as f:
         data = pickle.load(f)
 
-    # Create base graph
     g = nx.Graph()
-    g.add_nodes_from(data['nodes'])  # Expecting list of (node_id, attr_dict)
-    
-    # Clean edge attributes
+
+    # Add nodes (with optional attributes)
+    if isinstance(data['nodes'][0], tuple):  # (node_id, attr_dict)
+        g.add_nodes_from(data['nodes'])
+    else:  # list of node ids
+        for node in data['nodes']:
+            g.add_node(node, node_feature=torch.tensor([1.0], dtype=torch.float))
+
+    # Clean and add edges
     cleaned_edges = []
-    for u, v, attr in data['edges']:
-        clean_attr = {k: v for k, v in attr.items() if isinstance(k, str) and v is not None}
+    for edge in data['edges']:
+        if len(edge) == 3:
+            u, v, attr = edge
+            # Remove non-string keys or None values
+            clean_attr = {
+                str(k): (v if v is not None else 0.0)
+                for k, v in attr.items()
+                if isinstance(k, str)
+            }
+        else:
+            u, v = edge
+            clean_attr = {"weight": 1.0}
         cleaned_edges.append((u, v, clean_attr))
+
     g.add_edges_from(cleaned_edges)
 
-    # Build dataset with node features
-    minimal_graph = nx.Graph()
-    minimal_graph.add_nodes_from((n, d) for n, d in g.nodes(data=True))
-    minimal_graph.add_edges_from((u, v, d) for u, v, d in g.edges(data=True))
+    # Add node features if not already present
+    for node in g.nodes:
+        if 'node_feature' not in g.nodes[node]:
+            g.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
 
-    for node in minimal_graph.nodes():
-        minimal_graph.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
-
-    # Convert to DSGraph
-    processed_graph = DSGraph(minimal_graph)
+    # Convert to DeepSNAP graph
+    processed_graph = DSGraph(g)
 
     self.full_graph = processed_graph
     self.node_anchored = node_anchored
