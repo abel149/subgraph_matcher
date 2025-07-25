@@ -68,12 +68,19 @@ jobs:
             decoder-image:latest \
             bash -c "
               set -e
-              echo 'Starting matcher run on synthetic data...'
-              python3 -m subgraph_matching.train --dataset=graph.pkl --node_anchored --batch_size 32 --val_size 320
+              echo 'Starting matcher run on custom gene graph...'
+              python3 -m subgraph_matching.train \
+                --dataset=graph \
+                --graph_pkl_path=graph.pkl \
+                --node_anchored \
+                --batch_size 32 \
+                --val_size 320
               echo 'Checking output directories...'
               ls -la /app/results
               ls -la /app/plots
-              "
+            "
+
+                    "
 
       - name: Check for matcher outputs
         run: |

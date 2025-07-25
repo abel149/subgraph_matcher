@@ -41,6 +41,8 @@ def parse_encoder(parser, arg_str=None):
     enc_parser.add_argument('--n_workers', type=int)
     enc_parser.add_argument('--tag', type=str,
         help='tag to identify the run')
+    enc_parser.add_argument("--graph_pkl_path", type=str, default=None,
+                    help="Path to the .pkl file containing the graph to be used for training")
 
     enc_parser.set_defaults(conv_type='SAGE',
                         method_type='order',
