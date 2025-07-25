@@ -107,10 +107,10 @@ class GeneGraphDataSource:
     def __init__(self, graph_pkl_path, node_anchored=True, num_queries=32, subgraph_hops=1):
         with open(graph_pkl_path, "rb") as f:
             graph_data = pickle.load(f)
-
-        g = nx.Graph()
-        g.add_nodes_from(graph_data.nodes())
-        g.add_edges_from(graph_data.edges())
+        for graph in enumerate(graph_data):
+            g = nx.Graph()
+            g.add_nodes_from(graph.nodes())
+            g.add_edges_from(graph.edges())
 
         for u, v in g.edges():
             edge_data = g.edges[u, v]
