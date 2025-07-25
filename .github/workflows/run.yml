@@ -31,7 +31,6 @@ jobs:
           context: .
           load: true
           tags: decoder-image:latest
-          no-cache: true
           cache-from: |
             type=local,src=/tmp/.buildx-cache
           cache-to: |
@@ -80,8 +79,6 @@ jobs:
               ls -la /app/results
               ls -la /app/plots
             "
-
-                    "
 
       - name: Check for matcher outputs
         run: |
