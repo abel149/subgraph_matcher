@@ -105,50 +105,39 @@ class DataSource:
 
 class GeneGraphDataSource:
   def __init__(self, graph_pkl_path, node_anchored=True, num_queries=32, subgraph_hops=1):
-    import pickle
-    import torch
     import networkx as nx
+    import torch
+    import pickle
     from deepsnap.graph import Graph as DSGraph
 
+    # Load and create base NetworkX graph
     with open(graph_pkl_path, "rb") as f:
         data = pickle.load(f)
 
     g = nx.Graph()
+    g.add_nodes_from(data['nodes'])
 
-    # Add nodes (with optional attributes)
-    if isinstance(data['nodes'][0], tuple):  # (node_id, attr_dict)
-        g.add_nodes_from(data['nodes'])
-    else:  # list of node ids
-        for node in data['nodes']:
-            g.add_node(node, node_feature=torch.tensor([1.0], dtype=torch.float))
-
-    # Clean and add edges
-    cleaned_edges = []
+    # Edge list must have optional data as a dictionary
     for edge in data['edges']:
-        if len(edge) == 3:
-            u, v, attr = edge
-            # Remove non-string keys or None values
-            clean_attr = {
-                str(k): (v if v is not None else 0.0)
-                for k, v in attr.items()
-                if isinstance(k, str)
-            }
-        else:
+        # Handles edge as: (u, v) or (u, v, attr_dict)
+        if len(edge) == 2:
             u, v = edge
-            clean_attr = {"weight": 1.0}
-        cleaned_edges.append((u, v, clean_attr))
+            g.add_edge(u, v, edge_feature=torch.tensor([1.0]))  # Default attribute
+        elif len(edge) == 3:
+            u, v, attr = edge
+            g.add_edge(u, v, **attr)
+        else:
+            raise ValueError(f"Malformed edge: {edge}")
 
-    g.add_edges_from(cleaned_edges)
+    # Assign default node features (you can change this)
+    for node in g.nodes():
+        g.nodes[node]['node_feature'] = torch.tensor([1.0])
 
-    # Add node features if not already present
-    for node in g.nodes:
-        if 'node_feature' not in g.nodes[node]:
-            g.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
+    # Create a DeepSnap graph
+    ds_graph = DSGraph(g)
 
-    # Convert to DeepSNAP graph
-    processed_graph = DSGraph(g)
-
-    self.full_graph = processed_graph
+    # Store as class attributes
+    self.full_graph = ds_graph
     self.node_anchored = node_anchored
     self.num_queries = num_queries
     self.subgraph_hops = subgraph_hops
