@@ -109,8 +109,8 @@ class GeneGraphDataSource:
             graph_data = pickle.load(f)
 
         g = nx.Graph()
-        g.add_nodes_from(graph_data["nodes"])
-        g.add_edges_from(graph_data["edges"])
+        g.add_nodes_from(graph_data.nodes())
+        g.add_edges_from(graph_data.edges())
 
         for u, v in g.edges():
             edge_data = g.edges[u, v]
