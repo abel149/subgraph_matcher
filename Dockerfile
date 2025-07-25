@@ -39,8 +39,6 @@ COPY requirements.txt .
 
 RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
-
-
 RUN pip install --no-cache-dir numpy==1.21.6
 
 RUN pip install --no-cache-dir \
@@ -63,9 +61,5 @@ RUN pip install --no-cache-dir \
     networkx==2.4 \
     test-tube==0.7.5 \
     tqdm==4.43.0
-
-# FIX: Reinstall deepsnap last to ensure it's correctly in the image
-RUN python3 -m pip install --no-cache-dir --force-reinstall deepsnap==0.1.2
-
 
 COPY . .
