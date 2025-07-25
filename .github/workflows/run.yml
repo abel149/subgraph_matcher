@@ -69,7 +69,7 @@ jobs:
             bash -c "
               set -e
               echo 'Starting matcher run on custom gene graph...'
-              python3 -m subgraph_matching.train \
+              python -m subgraph_matching.train \
                 --dataset=graph \
                 --graph_pkl_path=graph.pkl \
                 --node_anchored \
