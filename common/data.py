@@ -73,16 +73,6 @@ class DataSource:
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
         raise NotImplementedError
 
-    
-import pickle
-import random
-import networkx as nx
-import torch
-from torch.utils.data import DataLoader as TorchDataLoader
-from deep_snap import DSGraph
-from batch import Batch
-import feature_preprocess
-import utils
 
 class OTFSynDataSource:
     """Modified OTFSynDataSource to use your own target graph (.pkl) and
