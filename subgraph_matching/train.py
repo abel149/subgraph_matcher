@@ -14,7 +14,6 @@ import os
 import random
 import time
 
-from deepsnap.batch import Batch
 import networkx as nx
 import numpy as np
 from sklearn.manifold import TSNE
