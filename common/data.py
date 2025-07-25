@@ -104,27 +104,37 @@ class DataSource:
         raise NotImplementedError
 
 class GeneGraphDataSource:
-    def __init__(self, graph_pkl_path, node_anchored=True, num_queries=32, subgraph_hops=1):
-        with open(graph_pkl_path, "rb") as f:
-            data = pickle.load(f)
-            g = nx.Graph()
-            g.add_nodes_from(data['nodes'])
-            g.add_edges_from(data['edges'])
-        
-        dataset = [g]
-        processed_graphs= []
-        for graph in enumerate(dataset):
-            minimal_graph = nx.Graph()
-            minimal_graph.add_nodes_from(graph.nodes())
-            minimal_graph.add_edges_from(graph.edges())
-            for node in minimal_graph.nodes():
-                minimal_graph.nodes[node]['node_feature'] = torch.tensor([1.0])
-            processed_graphs.append(DSGraph(minimal_graph))
-       
-        self.full_graph = processed_graphs[0]
-        self.node_anchored = node_anchored
-        self.num_queries = num_queries
-        self.subgraph_hops = subgraph_hops
+   def __init__(self, graph_pkl_path, node_anchored=True, num_queries=32, subgraph_hops=1):
+    with open(graph_pkl_path, "rb") as f:
+        data = pickle.load(f)
+
+    # Create base graph
+    g = nx.Graph()
+    g.add_nodes_from(data['nodes'])  # Expecting list of (node_id, attr_dict)
+    
+    # Clean edge attributes
+    cleaned_edges = []
+    for u, v, attr in data['edges']:
+        clean_attr = {k: v for k, v in attr.items() if isinstance(k, str) and v is not None}
+        cleaned_edges.append((u, v, clean_attr))
+    g.add_edges_from(cleaned_edges)
+
+    # Build dataset with node features
+    minimal_graph = nx.Graph()
+    minimal_graph.add_nodes_from((n, d) for n, d in g.nodes(data=True))
+    minimal_graph.add_edges_from((u, v, d) for u, v, d in g.edges(data=True))
+
+    for node in minimal_graph.nodes():
+        minimal_graph.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
+
+    # Convert to DSGraph
+    processed_graph = DSGraph(minimal_graph)
+
+    self.full_graph = processed_graph
+    self.node_anchored = node_anchored
+    self.num_queries = num_queries
+    self.subgraph_hops = subgraph_hops
+
 
 
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
