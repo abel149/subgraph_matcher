@@ -126,7 +126,10 @@ class GeneGraphDataSource:
         self.subgraph_hops = subgraph_hops
 
 
-    def gen_batch(self, size):
+    def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
+    # Here, ignore batch_neg_target, batch_neg_query if you don't need them yet
+    # Use batch_target or self.full_graph to generate batches as before
+
         query_nodes = random.sample(list(self.full_graph.nodes), self.num_queries)
         pos_target_graph = DSGraph(self.full_graph.copy())  # Shared full graph
         pos_target_graph.graph["idx"] = 0
@@ -134,7 +137,8 @@ class GeneGraphDataSource:
 
         query_graphs = []
         for i, node in enumerate(query_nodes):
-            sub_nodes = nx.single_source_shortest_path_length(self.full_graph, node, cutoff=self.subgraph_hops).keys()
+            sub_nodes = nx.single_source_shortest_path_length(
+                self.full_graph, node, cutoff=self.subgraph_hops).keys()
             subgraph = self.full_graph.subgraph(sub_nodes).copy()
             g = DSGraph(subgraph)
             g.graph["idx"] = i
@@ -142,11 +146,12 @@ class GeneGraphDataSource:
 
         pos_query = Batch.from_data_list(query_graphs)
 
-        # No negative sampling here (leave placeholders)
-        neg_target = Batch.from_data_list([DSGraph(nx.empty_graph(1)) for _ in range(size)])
-        neg_query = Batch.from_data_list([DSGraph(nx.empty_graph(1)) for _ in range(size)])
+        # Negative samples can be empty graphs or implement your own neg sampling
+        neg_target = Batch.from_data_list([DSGraph(nx.empty_graph(1)) for _ in range(len(pos_target))])
+        neg_query = Batch.from_data_list([DSGraph(nx.empty_graph(1)) for _ in range(len(pos_query))])
 
         return pos_target, pos_query, neg_target, neg_query
+
 
     def gen_data_loaders(self, size, batch_size, train=True, use_distributed_sampling=False):
         dummy_loader = [None] * (size // batch_size)
