@@ -108,19 +108,46 @@ class GeneGraphDataSource:
         with open(graph_pkl_path, "rb") as f:
             graph_data = pickle.load(f)
 
-        # 🔁 Convert dict to networkx.Graph
-        G = nx.Graph()
-        G.add_nodes_from(graph_data["nodes"])
-        G.add_edges_from(graph_data["edges"])
+        g = nx.Graph()
+        g.add_nodes_from(graph_data["nodes"])
+        g.add_edges_from(graph_data["edges"])
 
-        # Add node features
-        for node in G.nodes:
-            if "features" in graph_data and node in graph_data["features"]:
-                G.nodes[node]["node_feature"] = torch.tensor(graph_data["features"][node], dtype=torch.float)
+        for u, v in g.edges():
+            edge_data = g.edges[u, v]
+
+            bad_keys = [k for k in list(edge_data.keys())
+                        if not isinstance(k, str) or k.strip() == "" or isinstance(k, dict)]
+            for k in bad_keys:
+                del edge_data[k]
+
+            if len(edge_data) == 0:
+                edge_data['weight'] = 1.0
+
+            if 'weight' not in edge_data:
+                edge_data['weight'] = 1.0
             else:
-                G.nodes[node]["node_feature"] = torch.ones(1)  # fallback
+                try:
+                    edge_data['weight'] = float(edge_data['weight'])
+                except (ValueError, TypeError):
+                    edge_data['weight'] = 1.0
 
-        self.full_graph = G
+            if 'type' in edge_data:
+                edge_data['type_str'] = str(edge_data['type'])
+                edge_data['type'] = float(hash(str(edge_data['type'])) % 1000)
+
+        for node in g.nodes():
+            node_data = g.nodes[node]
+
+            if 'node_feature' not in node_data:
+                node_data['node_feature'] = torch.tensor([1.0], dtype=torch.float)
+
+            if 'label' not in node_data:
+                node_data['label'] = str(node)
+
+            if 'id' not in node_data:
+                node_data['id'] = str(node)
+
+        self.full_graph = g
         self.node_anchored = node_anchored
         self.num_queries = num_queries
         self.subgraph_hops = subgraph_hops
