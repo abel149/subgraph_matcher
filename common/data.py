@@ -126,7 +126,7 @@ class GeneGraphDataSource:
         self.subgraph_hops = subgraph_hops
 
 
-    def get_batch(self, size):
+    def gen_batch(self, size):
         query_nodes = random.sample(list(self.full_graph.nodes), self.num_queries)
         pos_target_graph = DSGraph(self.full_graph.copy())  # Shared full graph
         pos_target_graph.graph["idx"] = 0
