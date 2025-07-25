@@ -8,7 +8,7 @@ HYPERPARAM_SEARCH_N_TRIALS = None   # how many grid search trials to run
 
 import argparse
 import os
-import torch
+
 import torch.nn as nn
 import torch.multiprocessing as mp
 import torch.optim as optim
