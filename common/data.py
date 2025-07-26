@@ -175,7 +175,7 @@ class GeneGraphDataSource:
             print(f"[ERROR] Failed to process graph at index {i}: {e}")
 
     # Convert to DeepSnap Graphs
-    self.full_graph = [DSGraph(g) for g in cleaned_graphs]
+    self.full_graph =  DSGraph(cleaned_graphs[0])
     self.node_anchored = node_anchored
     self.num_queries = num_queries
     self.subgraph_hops = subgraph_hops
