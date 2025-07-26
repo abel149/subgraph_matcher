@@ -147,7 +147,7 @@ class GeneGraphDataSource:
     # Here, ignore batch_neg_target, batch_neg_query if you don't need them yet
     # Use batch_target or self.full_graph to generate batches as before
 
-        query_nodes = random.sample(list(self.full_graph.nodes), self.num_queries)
+        query_nodes = random.sample(list(self.full_graph.G.nodes), self.num_queries)
         pos_target_graph = DSGraph(self.full_graph.copy())  # Shared full graph
         pos_target_graph.graph["idx"] = 0
         pos_target = Batch.from_data_list([pos_target_graph])
