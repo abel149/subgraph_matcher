@@ -115,24 +115,33 @@ class GeneGraphDataSource:
 
     G = nx.Graph()
     G.add_nodes_from(raw_data['nodes'])
-    G.add_edges_from(raw_data['edges'])
 
-    # Add default node_feature if missing
+    # Clean edge attributes before adding
+    cleaned_edges = []
+    for edge in raw_data['edges']:
+        if len(edge) == 3:
+            u, v, attr = edge
+            cleaned_attr = {}
+            for key, val in attr.items():
+                if isinstance(val, (int, float)):  # Only keep tensor-compatible values
+                    cleaned_attr[key] = val
+                # optionally: encode string attributes like this
+                # elif key == 'type':
+                #     cleaned_attr[key] = 0  # or a mapping if you have multiple types
+            cleaned_edges.append((u, v, cleaned_attr))
+        else:
+            cleaned_edges.append(edge)  # No attribute case
+    G.add_edges_from(cleaned_edges)
+
+    # Ensure node features exist
     for node in G.nodes():
         if 'node_feature' not in G.nodes[node]:
-            G.nodes[node]['node_feature'] = torch.tensor([1.0])  # or customize per 'label'
-
-    # Add edge_feature as tensor
-    for u, v, attr in G.edges(data=True):
-        # You can build your own tensor from existing attrs if needed
-        # For example, encoding 'type' or using 'weight'
-        attr['edge_feature'] = torch.tensor([attr.get('weight', 1.0)], dtype=torch.float)
+            G.nodes[node]['node_feature'] = torch.tensor([1.0])
 
     self.full_graph = DSGraph(G)
     self.node_anchored = node_anchored
     self.num_queries = num_queries
     self.subgraph_hops = subgraph_hops
-
   
   def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
     # Here, ignore batch_neg_target, batch_neg_query if you don't need them yet
