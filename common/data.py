@@ -184,7 +184,7 @@ class GeneGraphDataSource:
 
 
 
-    def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
+  def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
     # Here, ignore batch_neg_target, batch_neg_query if you don't need them yet
     # Use batch_target or self.full_graph to generate batches as before
 
@@ -211,7 +211,7 @@ class GeneGraphDataSource:
         return pos_target, pos_query, neg_target, neg_query
 
 
-    def gen_data_loaders(self, size, batch_size, train=True, use_distributed_sampling=False):
+  def gen_data_loaders(self, size, batch_size, train=True, use_distributed_sampling=False):
         dummy_loader = [None] * (size // batch_size)
         return [dummy_loader, dummy_loader, dummy_loader]
 
