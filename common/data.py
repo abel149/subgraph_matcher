@@ -110,70 +110,20 @@ class GeneGraphDataSource:
     import torch
     from deepsnap.graph import Graph as DSGraph
 
-    # Load dict from pickle file
     with open(graph_pkl_path, "rb") as f:
         raw_data = pickle.load(f)
 
-    # Build networkx graph
     G = nx.Graph()
+    # Add nodes directly (each item is (node_id, attr_dict))
+    G.add_nodes_from(raw_data['nodes'])
+    # Add edges directly (each item is (u,v) or (u,v,attr_dict))
+    G.add_edges_from(raw_data['edges'])
 
-    # Add nodes
-    for node in raw_data['nodes']:
-        if isinstance(node, dict) and 'id' in node:
-            node_id = node['id']
-            attrs = {k: v for k, v in node.items() if k != 'id'}
-            G.add_node(node_id, **attrs)
-        else:
-            G.add_node(node)
-
-    # Add edges
-    for edge in raw_data['edges']:
-        if isinstance(edge, (list, tuple)):
-            if len(edge) == 2:
-                u, v = edge
-                G.add_edge(u, v)
-            elif len(edge) >= 3:
-                u, v, *attrs = edge
-                edge_attrs = {}
-                # If weight or other attributes passed as third element, handle accordingly
-                if len(attrs) == 1 and isinstance(attrs[0], (int, float)):
-                    edge_attrs['weight'] = attrs[0]
-                G.add_edge(u, v, **edge_attrs)
-        elif isinstance(edge, dict):
-            u = edge.get('source') or edge.get('u')
-            v = edge.get('target') or edge.get('v')
-            edge_attrs = {k: v for k, v in edge.items() if k not in ['source', 'target', 'u', 'v']}
-            G.add_edge(u, v, **edge_attrs)
-
-    # Optional: Clean node attributes and add node_feature tensor required by DeepSnap
+    # Make sure every node has a 'node_feature' tensor
     for node in G.nodes():
-        node_attrs = G.nodes[node]
-        if 'label' not in node_attrs:
-            node_attrs['label'] = str(node)
-        if 'id' not in node_attrs:
-            node_attrs['id'] = str(node)
-        # Add default node feature as a tensor
-        node_attrs['node_feature'] = torch.tensor([1.0])
+        if 'node_feature' not in G.nodes[node]:
+            G.nodes[node]['node_feature'] = torch.tensor([1.0])
 
-    # Optional: Clean edge attributes (ensure 'weight' is float, remove bad keys)
-    for u, v, attrs in G.edges(data=True):
-        bad_keys = [k for k in attrs if not isinstance(k, str) or k.strip() == "" or isinstance(attrs[k], dict)]
-        for k in bad_keys:
-            del attrs[k]
-
-        if 'weight' not in attrs:
-            attrs['weight'] = 1.0
-        else:
-            try:
-                attrs['weight'] = float(attrs['weight'])
-            except Exception:
-                attrs['weight'] = 1.0
-
-        if 'type' in attrs:
-            attrs['type_str'] = str(attrs['type'])
-            attrs['type'] = float(hash(str(attrs['type'])) % 1000)
-
-    # Wrap the networkx graph as a DeepSnap DSGraph object
     self.full_graph = DSGraph(G)
     self.node_anchored = node_anchored
     self.num_queries = num_queries
