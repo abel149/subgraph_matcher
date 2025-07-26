@@ -144,30 +144,40 @@ class GeneGraphDataSource:
     self.subgraph_hops = subgraph_hops
   
   def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
-    # Here, ignore batch_neg_target, batch_neg_query if you don't need them yet
-    # Use batch_target or self.full_graph to generate batches as before
+    import random
+    import networkx as nx
+    from deepsnap.graph import Graph as DSGraph
+    from torch_geometric.data import Batch
 
-        query_nodes = random.sample(list(self.full_graph.G.nodes), self.num_queries)
-        pos_target_graph = DSGraph(self.full_graph.copy())  # Shared full graph
-        pos_target_graph.graph["idx"] = 0
-        pos_target = Batch.from_data_list([pos_target_graph])
+    # Sample query nodes from the full graph's underlying nx graph
+    query_nodes = random.sample(list(self.full_graph.G.nodes), self.num_queries)
 
-        query_graphs = []
-        for i, node in enumerate(query_nodes):
-            sub_nodes = nx.single_source_shortest_path_length(
-                self.full_graph, node, cutoff=self.subgraph_hops).keys()
-            subgraph = self.full_graph.subgraph(sub_nodes).copy()
-            g = DSGraph(subgraph)
-            g.graph["idx"] = i
-            query_graphs.append(g)
+    # Copy the underlying networkx graph to create a deepsnap graph
+    pos_target_graph = DSGraph(self.full_graph.G.copy())
+    pos_target_graph.graph["idx"] = 0
+    pos_target = Batch.from_data_list([pos_target_graph])
 
-        pos_query = Batch.from_data_list(query_graphs)
+    query_graphs = []
+    for i, node in enumerate(query_nodes):
+        # Extract subgraph using the underlying nx graph
+        sub_nodes = nx.single_source_shortest_path_length(
+            self.full_graph.G, node, cutoff=self.subgraph_hops).keys()
 
-        # Negative samples can be empty graphs or implement your own neg sampling
-        neg_target = Batch.from_data_list([DSGraph(nx.empty_graph(1)) for _ in range(len(pos_target))])
-        neg_query = Batch.from_data_list([DSGraph(nx.empty_graph(1)) for _ in range(len(pos_query))])
+        subgraph_nx = self.full_graph.G.subgraph(sub_nodes).copy()
+        g = DSGraph(subgraph_nx)
+        g.graph["idx"] = i
+        query_graphs.append(g)
 
-        return pos_target, pos_query, neg_target, neg_query
+    pos_query = Batch.from_data_list(query_graphs)
+
+    # Create empty graphs for negative samples
+    neg_target_graphs = [DSGraph(nx.empty_graph(1)) for _ in range(len(query_graphs))]
+    neg_query_graphs = [DSGraph(nx.empty_graph(1)) for _ in range(len(query_graphs))]
+
+    neg_target = Batch.from_data_list(neg_target_graphs)
+    neg_query = Batch.from_data_list(neg_query_graphs)
+
+    return pos_target, pos_query, neg_target, neg_query
 
 
   def gen_data_loaders(self, size, batch_size, train=True, use_distributed_sampling=False):
