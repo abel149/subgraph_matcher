@@ -146,7 +146,7 @@ def train(args, model, logger, in_queue, out_queue):
 def train_loop(args):
     import torch.multiprocessing as mp
     mp.set_start_method('spawn', force=True)
-    torch.multiprocessing.set_sharing_strategy('file_system')
+    torch.multiprocessing.set_sharing_strategy('file_descriptor')
     if not os.path.exists(os.path.dirname(args.model_path)):
         os.makedirs(os.path.dirname(args.model_path))
     if not os.path.exists("plots/"):
