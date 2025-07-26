@@ -114,30 +114,55 @@ class GeneGraphDataSource:
     with open(graph_pkl_path, "rb") as f:
         data = pickle.load(f)
 
+    graphs = []
+    for  graph in enumerate(data):
+        if not type(graph) == nx.Graph:
+            graph = pyg_utils.to_networkx(graph).to_undirected()
+            for node in graph.nodes():
+                if 'label' not in graph.nodes[node]:
+                    graph.nodes[node]['label'] = str(node)
+                if 'id' not in graph.nodes[node]:
+                    graph.nodes[node]['id'] = str(node)
+        graphs.append(graph)
+    
     g = nx.Graph()
-    g.add_nodes_from(data['nodes'])
+    g.add_nodes_from(graphs.nodes())
+    g.add_edges_from(graphs.edges())
+   # g = graph.copy()
+    
+    # Standardize edge attributes
+    for u, v in g.edges():
+        edge_data = g.edges[u, v]
 
-    # Edge list must have optional data as a dictionary
-    for edge in data['edges']:
-        # Handles edge as: (u, v) or (u, v, attr_dict)
-        if len(edge) == 2:
-            u, v = edge
-            g.add_edge(u, v, edge_feature=torch.tensor([1.0]))  # Default attribute
-        elif len(edge) == 3:
-            u, v, attr = edge
-            g.add_edge(u, v, **attr)
+        # Remove invalid keys
+        bad_keys = [k for k in list(edge_data.keys()) if not isinstance(k, str) or k.strip() == "" or isinstance(k, dict)]
+        for k in bad_keys:
+            del edge_data[k]
+
+        # Clean empty edge attributes if any
+        if len(edge_data) == 0:
+            edge_data['weight'] = 1.0
+        # Ensure weight exists
+        if 'weight' not in edge_data:
+            edge_data['weight'] = 1.0
         else:
-            raise ValueError(f"Malformed edge: {edge}")
-
-    # Assign default node features (you can change this)
+            try:
+                edge_data['weight'] = float(edge_data['weight'])
+            except (ValueError, TypeError):
+                edge_data['weight'] = 1.0
+        
+        # Handle edge type
+        if 'type' in edge_data:
+            edge_data['type_str'] = str(edge_data['type'])
+            edge_data['type'] = float(hash(str(edge_data['type'])) % 1000)
+    
+    # Standardize node attributes
     for node in g.nodes():
         g.nodes[node]['node_feature'] = torch.tensor([1.0])
-
-    # Create a DeepSnap graph
-    ds_graph = DSGraph(g)
-
+            
+        return g
     # Store as class attributes
-    self.full_graph = ds_graph
+    self.full_graph = graphs
     self.node_anchored = node_anchored
     self.num_queries = num_queries
     self.subgraph_hops = subgraph_hops
