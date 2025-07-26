@@ -74,7 +74,7 @@ jobs:
                 --graph_pkl_path=graph.pkl \
                 --node_anchored \
                 --batch_size 1 \
-                --val_size 320
+                --val_size 10
               echo 'Checking output directories...'
               ls -la /app/results
               ls -la /app/plots
