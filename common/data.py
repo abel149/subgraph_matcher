@@ -114,21 +114,24 @@ class GeneGraphDataSource:
         raw_data = pickle.load(f)
 
     G = nx.Graph()
-    # Add nodes directly (each item is (node_id, attr_dict))
     G.add_nodes_from(raw_data['nodes'])
-    # Add edges directly (each item is (u,v) or (u,v,attr_dict))
     G.add_edges_from(raw_data['edges'])
 
-    # Make sure every node has a 'node_feature' tensor
+    # Add default node_feature if missing
     for node in G.nodes():
         if 'node_feature' not in G.nodes[node]:
-            G.nodes[node]['node_feature'] = torch.tensor([1.0])
+            G.nodes[node]['node_feature'] = torch.tensor([1.0])  # or customize per 'label'
+
+    # Add edge_feature as tensor
+    for u, v, attr in G.edges(data=True):
+        # You can build your own tensor from existing attrs if needed
+        # For example, encoding 'type' or using 'weight'
+        attr['edge_feature'] = torch.tensor([attr.get('weight', 1.0)], dtype=torch.float)
 
     self.full_graph = DSGraph(G)
     self.node_anchored = node_anchored
     self.num_queries = num_queries
     self.subgraph_hops = subgraph_hops
-
 
   
   def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
