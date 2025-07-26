@@ -149,12 +149,12 @@ class GeneGraphDataSource:
     from deepsnap.graph import Graph as DSGraph
     from torch_geometric.data import Batch
 
-    # 1. Sample random query nodes from the underlying networkx graph
+    # 1. Sample random query nodes from the underlying NetworkX graph
     query_nodes = random.sample(list(self.full_graph.G.nodes), self.num_queries)
 
     # 2. Prepare positive target (whole graph)
     pos_target_graph = DSGraph(self.full_graph.G.copy())
-    pos_target_graph.idx = 0  # Custom attribute, optional
+    pos_target_graph.idx = 0  # Optional: custom attribute
     pos_target = Batch.from_data_list([pos_target_graph])
 
     # 3. Prepare positive query graphs (subgraphs around sampled nodes)
@@ -164,15 +164,26 @@ class GeneGraphDataSource:
             self.full_graph.G, node, cutoff=self.subgraph_hops).keys()
 
         subgraph_nx = self.full_graph.G.subgraph(sub_nodes).copy()
+        if subgraph_nx.number_of_edges() == 0:
+            # Force at least one edge to avoid DeepSnap crash
+            subgraph_nx.add_edge(node, node)
+
         g = DSGraph(subgraph_nx)
-        g.idx = i  # Optional tracking
+        g.idx = i
         query_graphs.append(g)
 
     pos_query = Batch.from_data_list(query_graphs)
 
-    # 4. Negative samples (currently dummy empty graphs)
-    neg_target = Batch.from_data_list([DSGraph(nx.empty_graph(1)) for _ in range(len(query_graphs))])
-    neg_query = Batch.from_data_list([DSGraph(nx.empty_graph(1)) for _ in range(len(query_graphs))])
+    # 4. Create valid negative samples (each must have at least one edge)
+    def make_valid_dummy_graph(idx):
+        G = nx.Graph()
+        G.add_edge(0, 1)  # Minimal valid graph with 1 edge
+        g = DSGraph(G)
+        g.idx = idx
+        return g
+
+    neg_target = Batch.from_data_list([make_valid_dummy_graph(i) for i in range(len(query_graphs))])
+    neg_query = Batch.from_data_list([make_valid_dummy_graph(i + len(query_graphs)) for i in range(len(query_graphs))])
 
     return pos_target, pos_query, neg_target, neg_query
 
