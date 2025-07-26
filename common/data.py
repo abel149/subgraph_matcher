@@ -108,58 +108,79 @@ class GeneGraphDataSource:
     import networkx as nx
     import torch
     import pickle
+    from torch_geometric.utils import to_networkx
+    from torch_geometric.data import Data
     from deepsnap.graph import Graph as DSGraph
 
-    # Load the list of graphs from a pickle file
+    # Load data from pickle safely
     with open(graph_pkl_path, "rb") as f:
         data = pickle.load(f)
 
+    # Ensure the data is a list
+    if not isinstance(data, list):
+        data = [data]
+
     cleaned_graphs = []
-    for graph in data:  # Correct: enumerate() was wrong
-        if not isinstance(graph, nx.Graph):
-            graph = pyg_utils.to_networkx(graph).to_undirected()
 
-        for node in graph.nodes():
-            if 'label' not in graph.nodes[node]:
-                graph.nodes[node]['label'] = str(node)
-            if 'id' not in graph.nodes[node]:
-                graph.nodes[node]['id'] = str(node)
+    for i, graph in enumerate(data):
+        try:
+            # Convert to NetworkX if it's a torch_geometric Data object
+            if isinstance(graph, Data):
+                graph = to_networkx(graph).to_undirected()
+            elif not isinstance(graph, nx.Graph):
+                print(f"[WARNING] Skipping non-graph at index {i}: {type(graph)}")
+                continue
 
-        # Standardize edge attributes
-        for u, v in graph.edges():
-            edge_data = graph.edges[u, v]
+            # Fix node attributes
+            for node in graph.nodes():
+                if 'label' not in graph.nodes[node]:
+                    graph.nodes[node]['label'] = str(node)
+                if 'id' not in graph.nodes[node]:
+                    graph.nodes[node]['id'] = str(node)
 
-            # Remove invalid edge attribute keys
-            bad_keys = [k for k in list(edge_data.keys())
-                        if not isinstance(k, str) or k.strip() == "" or isinstance(k, dict)]
-            for k in bad_keys:
-                del edge_data[k]
+            # Fix edge attributes
+            for u, v in graph.edges():
+                edge_data = graph.edges[u, v]
 
-            # Ensure edge weight exists and is a float
-            if 'weight' not in edge_data:
-                edge_data['weight'] = 1.0
-            else:
-                try:
-                    edge_data['weight'] = float(edge_data['weight'])
-                except (ValueError, TypeError):
+                # Remove bad keys
+                bad_keys = [k for k in list(edge_data.keys())
+                            if not isinstance(k, str) or k.strip() == "" or isinstance(k, dict)]
+                for k in bad_keys:
+                    del edge_data[k]
+
+                # Ensure edge weight
+                if 'weight' not in edge_data:
                     edge_data['weight'] = 1.0
+                else:
+                    try:
+                        edge_data['weight'] = float(edge_data['weight'])
+                    except (ValueError, TypeError):
+                        edge_data['weight'] = 1.0
 
-            # Handle edge type
-            if 'type' in edge_data:
-                edge_data['type_str'] = str(edge_data['type'])
-                edge_data['type'] = float(hash(str(edge_data['type'])) % 1000)
+                # Edge type
+                if 'type' in edge_data:
+                    edge_data['type_str'] = str(edge_data['type'])
+                    try:
+                        edge_data['type'] = float(hash(str(edge_data['type'])) % 1000)
+                    except Exception:
+                        edge_data['type'] = 0.0
 
-        # Add node feature for DeepSnap
-        for node in graph.nodes():
-            graph.nodes[node]['node_feature'] = torch.tensor([1.0])
+            # Node feature
+            for node in graph.nodes():
+                graph.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
 
-        cleaned_graphs.append(graph)
+            cleaned_graphs.append(graph)
 
-    # Use the cleaned-up list of NetworkX graphs
-    self.full_graph = [DSGraph(g) for g in cleaned_graphs]  # This will avoid the DSGraph error
+        except Exception as e:
+            print(f"[ERROR] Failed to process graph at index {i}: {e}")
+
+    # Convert to DeepSnap Graphs
+    self.full_graph = [DSGraph(g) for g in cleaned_graphs]
     self.node_anchored = node_anchored
     self.num_queries = num_queries
     self.subgraph_hops = subgraph_hops
+
+    print(f"[INFO] Loaded {len(self.full_graph)} DeepSnap-compatible graphs.")
 
 
 
