@@ -5,6 +5,8 @@
 HYPERPARAM_SEARCH = False
 HYPERPARAM_SEARCH_N_TRIALS = None   # how many grid search trials to run
                                     #    (set to None for exhaustive search)
+import torch.multiprocessing
+torch.multiprocessing.set_start_method('spawn', force=True)
 
 import argparse
 from itertools import permutations
@@ -38,6 +40,7 @@ if HYPERPARAM_SEARCH:
 else:
     from subgraph_matching.config import parse_encoder
 from subgraph_matching.test import validation
+
 
 def build_model(args):
     # build model
@@ -209,7 +212,9 @@ def train_loop(args):
         worker.join()
 
 def main(force_test=False):
-    mp.set_start_method("spawn", force=True)
+    import torch.multiprocessing as mp
+    mp.set_start_method('spawn', force=True)
+    torch.multiprocessing.set_sharing_strategy('file_system')
     parser = (argparse.ArgumentParser(description='Order embedding arguments')
         if not HYPERPARAM_SEARCH else
         HyperOptArgumentParser(strategy='grid_search'))
