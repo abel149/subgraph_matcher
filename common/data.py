@@ -105,79 +105,82 @@ class DataSource:
 
 class GeneGraphDataSource:
   def __init__(self, graph_pkl_path, node_anchored=True, num_queries=32, subgraph_hops=1):
+    import pickle
     import networkx as nx
     import torch
-    import pickle
     from deepsnap.graph import Graph as DSGraph
-    import torch_geometric.utils as pyg_utils
 
-    # Load graph dictionary from provided pickle path
+    # Load dict from pickle file
     with open(graph_pkl_path, "rb") as f:
-        graph_dict = pickle.load(f)
+        raw_data = pickle.load(f)
 
-    if not isinstance(graph_dict, dict):
-        raise TypeError("[ERROR] Expected a dictionary in the .pkl file, got: {}".format(type(graph_dict)))
+    # Build networkx graph
+    G = nx.Graph()
 
-    graph_list = list(graph_dict.values())
+    # Add nodes
+    for node in raw_data['nodes']:
+        if isinstance(node, dict) and 'id' in node:
+            node_id = node['id']
+            attrs = {k: v for k, v in node.items() if k != 'id'}
+            G.add_node(node_id, **attrs)
+        else:
+            G.add_node(node)
 
-    cleaned_graphs = []
-    for idx, graph in enumerate(graph_list):
-        try:
-            # Convert PyG Data to NetworkX graph if necessary
-            if not isinstance(graph, nx.Graph):
-                graph = pyg_utils.to_networkx(graph).to_undirected()
+    # Add edges
+    for edge in raw_data['edges']:
+        if isinstance(edge, (list, tuple)):
+            if len(edge) == 2:
+                u, v = edge
+                G.add_edge(u, v)
+            elif len(edge) >= 3:
+                u, v, *attrs = edge
+                edge_attrs = {}
+                # If weight or other attributes passed as third element, handle accordingly
+                if len(attrs) == 1 and isinstance(attrs[0], (int, float)):
+                    edge_attrs['weight'] = attrs[0]
+                G.add_edge(u, v, **edge_attrs)
+        elif isinstance(edge, dict):
+            u = edge.get('source') or edge.get('u')
+            v = edge.get('target') or edge.get('v')
+            edge_attrs = {k: v for k, v in edge.items() if k not in ['source', 'target', 'u', 'v']}
+            G.add_edge(u, v, **edge_attrs)
 
-            # Clean node attributes
-            for node in graph.nodes():
-                if 'label' not in graph.nodes[node]:
-                    graph.nodes[node]['label'] = str(node)
-                if 'id' not in graph.nodes[node]:
-                    graph.nodes[node]['id'] = str(node)
-                if 'node_feature' not in graph.nodes[node]:
-                    graph.nodes[node]['node_feature'] = torch.tensor([1.0])  # default feature
+    # Optional: Clean node attributes and add node_feature tensor required by DeepSnap
+    for node in G.nodes():
+        node_attrs = G.nodes[node]
+        if 'label' not in node_attrs:
+            node_attrs['label'] = str(node)
+        if 'id' not in node_attrs:
+            node_attrs['id'] = str(node)
+        # Add default node feature as a tensor
+        node_attrs['node_feature'] = torch.tensor([1.0])
 
-            # Clean edge attributes
-            for u, v in graph.edges():
-                edge_data = graph.edges[u, v]
+    # Optional: Clean edge attributes (ensure 'weight' is float, remove bad keys)
+    for u, v, attrs in G.edges(data=True):
+        bad_keys = [k for k in attrs if not isinstance(k, str) or k.strip() == "" or isinstance(attrs[k], dict)]
+        for k in bad_keys:
+            del attrs[k]
 
-                # Remove invalid edge keys
-                bad_keys = [k for k in list(edge_data.keys()) if not isinstance(k, str) or k.strip() == ""]
-                for k in bad_keys:
-                    del edge_data[k]
+        if 'weight' not in attrs:
+            attrs['weight'] = 1.0
+        else:
+            try:
+                attrs['weight'] = float(attrs['weight'])
+            except Exception:
+                attrs['weight'] = 1.0
 
-                # Default edge weight
-                if 'weight' not in edge_data:
-                    edge_data['weight'] = 1.0
-                else:
-                    try:
-                        edge_data['weight'] = float(edge_data['weight'])
-                    except Exception:
-                        edge_data['weight'] = 1.0
+        if 'type' in attrs:
+            attrs['type_str'] = str(attrs['type'])
+            attrs['type'] = float(hash(str(attrs['type'])) % 1000)
 
-                # Encode edge type
-                if 'type' in edge_data:
-                    edge_data['type_str'] = str(edge_data['type'])
-                    edge_data['type'] = float(hash(str(edge_data['type'])) % 1000)
-
-            cleaned_graphs.append(graph)
-
-        except Exception as e:
-            print(f"[WARN] Skipping graph {idx} due to error: {e}")
-
-    print(f"[INFO] Successfully cleaned {len(cleaned_graphs)} graphs.")
-
-    if not cleaned_graphs:
-        raise ValueError("[ERROR] No valid graphs found after preprocessing. Please check your data format.")
-
-    # Use first graph for full graph (e.g. for sampling)
-    self.full_graph = DSGraph(cleaned_graphs[0])
-    # Store other parameters
+    # Wrap the networkx graph as a DeepSnap DSGraph object
+    self.full_graph = DSGraph(G)
     self.node_anchored = node_anchored
     self.num_queries = num_queries
     self.subgraph_hops = subgraph_hops
 
 
-
+  
   def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
     # Here, ignore batch_neg_target, batch_neg_query if you don't need them yet
     # Use batch_target or self.full_graph to generate batches as before
