@@ -149,33 +149,30 @@ class GeneGraphDataSource:
     from deepsnap.graph import Graph as DSGraph
     from torch_geometric.data import Batch
 
-    # Sample query nodes from the full graph's underlying nx graph
+    # 1. Sample random query nodes from the underlying networkx graph
     query_nodes = random.sample(list(self.full_graph.G.nodes), self.num_queries)
 
-    # Copy the underlying networkx graph to create a deepsnap graph
+    # 2. Prepare positive target (whole graph)
     pos_target_graph = DSGraph(self.full_graph.G.copy())
-    pos_target_graph.graph["idx"] = 0
+    pos_target_graph.idx = 0  # Custom attribute, optional
     pos_target = Batch.from_data_list([pos_target_graph])
 
+    # 3. Prepare positive query graphs (subgraphs around sampled nodes)
     query_graphs = []
     for i, node in enumerate(query_nodes):
-        # Extract subgraph using the underlying nx graph
         sub_nodes = nx.single_source_shortest_path_length(
             self.full_graph.G, node, cutoff=self.subgraph_hops).keys()
 
         subgraph_nx = self.full_graph.G.subgraph(sub_nodes).copy()
         g = DSGraph(subgraph_nx)
-        g.graph["idx"] = i
+        g.idx = i  # Optional tracking
         query_graphs.append(g)
 
     pos_query = Batch.from_data_list(query_graphs)
 
-    # Create empty graphs for negative samples
-    neg_target_graphs = [DSGraph(nx.empty_graph(1)) for _ in range(len(query_graphs))]
-    neg_query_graphs = [DSGraph(nx.empty_graph(1)) for _ in range(len(query_graphs))]
-
-    neg_target = Batch.from_data_list(neg_target_graphs)
-    neg_query = Batch.from_data_list(neg_query_graphs)
+    # 4. Negative samples (currently dummy empty graphs)
+    neg_target = Batch.from_data_list([DSGraph(nx.empty_graph(1)) for _ in range(len(query_graphs))])
+    neg_query = Batch.from_data_list([DSGraph(nx.empty_graph(1)) for _ in range(len(query_graphs))])
 
     return pos_target, pos_query, neg_target, neg_query
 
