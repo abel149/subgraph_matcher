@@ -144,6 +144,9 @@ def train(args, model, logger, in_queue, out_queue):
             out_queue.put(("step", (loss.item(), acc)))
 
 def train_loop(args):
+    import torch.multiprocessing as mp
+    mp.set_start_method('spawn', force=True)
+    torch.multiprocessing.set_sharing_strategy('file_system')
     if not os.path.exists(os.path.dirname(args.model_path)):
         os.makedirs(os.path.dirname(args.model_path))
     if not os.path.exists("plots/"):
@@ -212,9 +215,9 @@ def train_loop(args):
         worker.join()
 
 def main(force_test=False):
-    import torch.multiprocessing as mp
+    
     mp.set_start_method('spawn', force=True)
-    torch.multiprocessing.set_sharing_strategy('file_system')
+ 
     parser = (argparse.ArgumentParser(description='Order embedding arguments')
         if not HYPERPARAM_SEARCH else
         HyperOptArgumentParser(strategy='grid_search'))
