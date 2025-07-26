@@ -111,52 +111,58 @@ class GeneGraphDataSource:
     from deepsnap.graph import Graph as DSGraph
     import common.pyg_utils as pyg_utils
 
+    # Load graph list
     with open(graph_pkl_path, "rb") as f:
         data = pickle.load(f)
 
+    print(f"[INFO] Loaded {len(data)} graphs from pickle.")
+
     cleaned_graphs = []
-    for graph in data:
-        if not isinstance(graph, nx.Graph):
-            try:
+    for idx, graph in enumerate(data):
+        try:
+            if not isinstance(graph, nx.Graph):
                 graph = pyg_utils.to_networkx(graph).to_undirected()
-            except Exception as e:
-                print(f"[!] Failed to convert graph: {e}")
-                continue
 
-        for node in graph.nodes():
-            if 'label' not in graph.nodes[node]:
-                graph.nodes[node]['label'] = str(node)
-            if 'id' not in graph.nodes[node]:
-                graph.nodes[node]['id'] = str(node)
+            # Clean node attributes
+            for node in graph.nodes():
+                if 'label' not in graph.nodes[node]:
+                    graph.nodes[node]['label'] = str(node)
+                if 'id' not in graph.nodes[node]:
+                    graph.nodes[node]['id'] = str(node)
+                graph.nodes[node]['node_feature'] = torch.tensor([1.0])
 
-        for u, v in graph.edges():
-            edge_data = graph.edges[u, v]
-            bad_keys = [k for k in list(edge_data.keys())
-                        if not isinstance(k, str) or k.strip() == "" or isinstance(k, dict)]
-            for k in bad_keys:
-                del edge_data[k]
+            # Clean edge attributes
+            for u, v in graph.edges():
+                edge_data = graph.edges[u, v]
+                bad_keys = [k for k in list(edge_data.keys()) if not isinstance(k, str) or k.strip() == ""]
+                for k in bad_keys:
+                    del edge_data[k]
 
-            if 'weight' not in edge_data:
-                edge_data['weight'] = 1.0
-            else:
-                try:
-                    edge_data['weight'] = float(edge_data['weight'])
-                except (ValueError, TypeError):
+                if 'weight' not in edge_data:
                     edge_data['weight'] = 1.0
+                else:
+                    try:
+                        edge_data['weight'] = float(edge_data['weight'])
+                    except Exception:
+                        edge_data['weight'] = 1.0
 
-            if 'type' in edge_data:
-                edge_data['type_str'] = str(edge_data['type'])
-                edge_data['type'] = float(hash(str(edge_data['type'])) % 1000)
+                if 'type' in edge_data:
+                    edge_data['type_str'] = str(edge_data['type'])
+                    edge_data['type'] = float(hash(str(edge_data['type'])) % 1000)
 
-        for node in graph.nodes():
-            graph.nodes[node]['node_feature'] = torch.tensor([1.0])
+            cleaned_graphs.append(graph)
+        except Exception as e:
+            print(f"[WARN] Skipping graph {idx} due to error: {e}")
 
-        cleaned_graphs.append(graph)
+    print(f"[INFO] Successfully cleaned {len(cleaned_graphs)} graphs.")
 
-    if len(cleaned_graphs) == 0:
-        raise ValueError("No valid graphs found in the pickle file. Please check the input file and format.")
+    if not cleaned_graphs:
+        raise ValueError("[ERROR] No valid graphs found after preprocessing. Please check your data.")
 
-    self.full_graph = DSGraph(cleaned_graphs[0])  # safe now
+    # Save one cleaned graph
+    self.full_graph = DSGraph(cleaned_graphs[0])
+
+    # Store other parameters
     self.node_anchored = node_anchored
     self.num_queries = num_queries
     self.subgraph_hops = subgraph_hops
