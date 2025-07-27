@@ -185,7 +185,7 @@ def train_loop(args):
             batch_target,
             batch_neg_target,
             batch_neg_query,
-            is_training=False
+            False
         )
         # Force CPU to avoid multiprocessing serialization issues
         pos_a = pos_a.to("cpu") if pos_a else None
