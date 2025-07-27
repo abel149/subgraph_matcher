@@ -145,26 +145,23 @@ def train(args, model, logger, in_queue, out_queue):
 
 def train_loop(args):
     import torch.multiprocessing as mp
-    mp.set_start_method('spawn', force=True)
-    torch.multiprocessing.set_sharing_strategy('file_descriptor')
+    import torch
+    import torch.optim as optim
+    import os
+    from torch.utils.tensorboard import SummaryWriter
+
     if not os.path.exists(os.path.dirname(args.model_path)):
         os.makedirs(os.path.dirname(args.model_path))
     if not os.path.exists("plots/"):
         os.makedirs("plots/")
 
-    print("Starting {} workers".format(args.n_workers))
-    in_queue, out_queue = mp.Queue(), mp.Queue()
+    logger = SummaryWriter()
 
-    print("Using dataset {}".format(args.dataset))
-
-    record_keys = ["conv_type", "n_layers", "hidden_dim",
-        "margin", "dataset", "max_graph_size", "skip"]
-    args_str = ".".join(["{}={}".format(k, v)
-        for k, v in sorted(vars(args).items()) if k in record_keys])
-    logger = SummaryWriter(comment=args_str)
+    print(f"Using dataset: {args.dataset}")
+    print(f"Workers requested: {args.n_workers}")
 
     model = build_model(args)
-    model.share_memory()
+    model.share_memory()  # Needed for multiprocessing
 
     if args.method_type == "order":
         clf_opt = optim.Adam(model.clf_model.parameters(), lr=args.lr)
@@ -172,47 +169,83 @@ def train_loop(args):
         clf_opt = None
 
     data_source = make_data_source(args)
-    loaders = data_source.gen_data_loaders(args.val_size, args.batch_size,
-        train=False, use_distributed_sampling=False)
+
+    print("Generating test data loader...")
+    loaders = data_source.gen_data_loaders(
+        args.val_size,
+        args.batch_size,
+        train=False,
+        use_distributed_sampling=False
+    )
+
+    # Do NOT send data to GPU before multiprocessing
     test_pts = []
     for batch_target, batch_neg_target, batch_neg_query in zip(*loaders):
-        pos_a, pos_b, neg_a, neg_b = data_source.gen_batch(batch_target,
-            batch_neg_target, batch_neg_query, False)
-        if pos_a:
-            pos_a = pos_a.to(torch.device("cpu"))
-            pos_b = pos_b.to(torch.device("cpu"))
-        neg_a = neg_a.to(torch.device("cpu"))
-        neg_b = neg_b.to(torch.device("cpu"))
+        pos_a, pos_b, neg_a, neg_b = data_source.gen_batch(
+            batch_target,
+            batch_neg_target,
+            batch_neg_query,
+            is_training=False
+        )
+        # Force CPU to avoid multiprocessing serialization issues
+        pos_a = pos_a.to("cpu") if pos_a else None
+        pos_b = pos_b.to("cpu") if pos_b else None
+        neg_a = neg_a.to("cpu")
+        neg_b = neg_b.to("cpu")
         test_pts.append((pos_a, pos_b, neg_a, neg_b))
+
+    # === CASE 1: No multiprocessing ===
+    if args.n_workers == 0:
+        print("[Info] Running training in single-process mode.")
+        for batch_n in range(args.n_batches):
+            train_loss, train_acc = train(args, model, data_source)
+            logger.add_scalar("Loss/train", train_loss, batch_n)
+            logger.add_scalar("Accuracy/train", train_acc, batch_n)
+            print(f"Batch {batch_n}: Loss={train_loss:.4f}, Acc={train_acc:.4f}")
+
+            if (batch_n + 1) % args.eval_interval == 0:
+                epoch = (batch_n + 1) // args.eval_interval
+                validation(args, model, test_pts, logger, batch_n, epoch)
+        return
+
+    # === CASE 2: Multiprocessing ===
+    print(f"Starting {args.n_workers} workers (multiprocessing)...")
+    mp.set_start_method('spawn', force=True)
+    torch.multiprocessing.set_sharing_strategy('file_descriptor')
+    in_queue = mp.Queue()
+    out_queue = mp.Queue()
 
     workers = []
     for i in range(args.n_workers):
-        worker = mp.Process(target=train, args=(args, model, data_source,
-            in_queue, out_queue))
+        worker = mp.Process(
+            target=train,
+            args=(args, model, data_source, in_queue, out_queue)
+        )
         worker.start()
         workers.append(worker)
 
     if args.test:
+        print("[Info] Running in test mode.")
         validation(args, model, test_pts, logger, 0, 0, verbose=True)
     else:
         batch_n = 0
         for epoch in range(args.n_batches // args.eval_interval):
-            for i in range(args.eval_interval):
+            for _ in range(args.eval_interval):
                 in_queue.put(("step", None))
-            for i in range(args.eval_interval):
+            for _ in range(args.eval_interval):
                 msg, params = out_queue.get()
                 train_loss, train_acc = params
-                print("Batch {}. Loss: {:.4f}. Training acc: {:.4f}".format(
-                    batch_n, train_loss, train_acc), end="               \r")
                 logger.add_scalar("Loss/train", train_loss, batch_n)
                 logger.add_scalar("Accuracy/train", train_acc, batch_n)
+                print(f"Batch {batch_n}: Loss={train_loss:.4f}, Acc={train_acc:.4f}", end="     \r")
                 batch_n += 1
             validation(args, model, test_pts, logger, batch_n, epoch)
 
-    for i in range(args.n_workers):
-        in_queue.put(("done", None))
-    for worker in workers:
-        worker.join()
+        # Graceful shutdown
+        for _ in range(args.n_workers):
+            in_queue.put(("done", None))
+        for worker in workers:
+            worker.join()
 
 def main(force_test=False):
     
