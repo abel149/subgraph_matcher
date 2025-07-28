@@ -104,93 +104,89 @@ class DataSource:
         raise NotImplementedError
 
 class GeneGraphDataSource:
-  def __init__(self, graph_pkl_path, node_anchored=True, num_queries=32, subgraph_hops=1):
-    import pickle
-    import networkx as nx
-    import torch
-    from deepsnap.graph import Graph as DSGraph
+    def __init__(self, graph_pkl_path, node_anchored=True, num_queries=32, subgraph_hops=1):
+        import pickle
+        with open(graph_pkl_path, "rb") as f:
+            raw_data = pickle.load(f)
 
-    with open(graph_pkl_path, "rb") as f:
-        raw_data = pickle.load(f)
+        self.node_anchored = node_anchored
+        self.num_queries = num_queries
+        self.subgraph_hops = subgraph_hops
+        self.raw_data = raw_data  # Save raw data only — not the graph object
 
-    G = nx.Graph()
-    G.add_nodes_from(raw_data['nodes'])
+    def _build_graph(self):
+        import networkx as nx
+        import torch
+        from deepsnap.graph import Graph as DSGraph
 
-    # Clean edge attributes before adding
-    cleaned_edges = []
-    for edge in raw_data['edges']:
-        if len(edge) == 3:
-            u, v, attr = edge
-            cleaned_attr = {}
-            for key, val in attr.items():
-                if isinstance(val, (int, float)):  # Only keep tensor-compatible values
-                    cleaned_attr[key] = val
-                # optionally: encode string attributes like this
-                # elif key == 'type':
-                #     cleaned_attr[key] = 0  # or a mapping if you have multiple types
-            cleaned_edges.append((u, v, cleaned_attr))
-        else:
-            cleaned_edges.append(edge)  # No attribute case
-    G.add_edges_from(cleaned_edges)
-
-    # Ensure node features exist
-    for node in G.nodes():
-        if 'node_feature' not in G.nodes[node]:
-            G.nodes[node]['node_feature'] = torch.tensor([1.0])
-
-    self.full_graph = DSGraph(G)
-    self.node_anchored = node_anchored
-    self.num_queries = num_queries
-    self.subgraph_hops = subgraph_hops
-  
-  def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
-    import random
-    import networkx as nx
-    from deepsnap.graph import Graph as DSGraph
-    from torch_geometric.data import Batch
-
-    # 1. Sample random query nodes from the underlying NetworkX graph
-    query_nodes = random.sample(list(self.full_graph.G.nodes), self.num_queries)
-
-    # 2. Prepare positive target (whole graph)
-    pos_target_graph = DSGraph(self.full_graph.G.copy())
-    pos_target_graph.idx = 0  # Optional: custom attribute
-    pos_target = Batch.from_data_list([pos_target_graph])
-
-    # 3. Prepare positive query graphs (subgraphs around sampled nodes)
-    query_graphs = []
-    for i, node in enumerate(query_nodes):
-        sub_nodes = nx.single_source_shortest_path_length(
-            self.full_graph.G, node, cutoff=self.subgraph_hops).keys()
-
-        subgraph_nx = self.full_graph.G.subgraph(sub_nodes).copy()
-        if subgraph_nx.number_of_edges() == 0:
-            # Force at least one edge to avoid DeepSnap crash
-            subgraph_nx.add_edge(node, node)
-
-        g = DSGraph(subgraph_nx)
-        g.idx = i
-        query_graphs.append(g)
-
-    pos_query = Batch.from_data_list(query_graphs)
-
-    # 4. Create valid negative samples (each must have at least one edge)
-    def make_valid_dummy_graph(idx):
         G = nx.Graph()
-        G.add_edge(0, 1)  # Minimal valid graph with 1 edge
-        g = DSGraph(G)
-        g.idx = idx
-        return g
+        G.add_nodes_from(self.raw_data['nodes'])
 
-    neg_target = Batch.from_data_list([make_valid_dummy_graph(i) for i in range(len(query_graphs))])
-    neg_query = Batch.from_data_list([make_valid_dummy_graph(i + len(query_graphs)) for i in range(len(query_graphs))])
+        cleaned_edges = []
+        for edge in self.raw_data['edges']:
+            if len(edge) == 3:
+                u, v, attr = edge
+                cleaned_attr = {
+                    k: v for k, v in attr.items() if isinstance(v, (int, float))
+                }
+                cleaned_edges.append((u, v, cleaned_attr))
+            else:
+                cleaned_edges.append(edge)
+        G.add_edges_from(cleaned_edges)
 
-    return pos_target, pos_query, neg_target, neg_query
+        for node in G.nodes():
+            if 'node_feature' not in G.nodes[node]:
+                G.nodes[node]['node_feature'] = torch.tensor([1.0])
 
+        return DSGraph(G)
 
-  def gen_data_loaders(self, size, batch_size, train=True, use_distributed_sampling=False):
+    def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
+        import random
+        import networkx as nx
+        from deepsnap.graph import Graph as DSGraph
+        from torch_geometric.data import Batch
+
+        ds_graph = self._build_graph()  # build here inside the worker
+        G = ds_graph.G
+
+        query_nodes = random.sample(list(G.nodes), self.num_queries)
+
+        pos_target_graph = DSGraph(G.copy())
+        pos_target_graph.idx = 0
+        pos_target = Batch.from_data_list([pos_target_graph])
+
+        query_graphs = []
+        for i, node in enumerate(query_nodes):
+            sub_nodes = nx.single_source_shortest_path_length(G, node, cutoff=self.subgraph_hops).keys()
+            subgraph_nx = G.subgraph(sub_nodes).copy()
+
+            if subgraph_nx.number_of_edges() == 0:
+                subgraph_nx.add_edge(node, node)
+
+            g = DSGraph(subgraph_nx)
+            g.idx = i
+            query_graphs.append(g)
+
+        pos_query = Batch.from_data_list(query_graphs)
+
+        def make_valid_dummy_graph(idx):
+            G_dummy = nx.Graph()
+            G_dummy.add_edge(0, 1)
+            g = DSGraph(G_dummy)
+            g.idx = idx
+            return g
+
+        neg_target = Batch.from_data_list([make_valid_dummy_graph(i) for i in range(len(query_graphs))])
+        neg_query = Batch.from_data_list([make_valid_dummy_graph(i + len(query_graphs)) for i in range(len(query_graphs))])
+
+        return pos_target, pos_query, neg_target, neg_query
+
+    def gen_data_loaders(self, size, batch_size, train=True, use_distributed_sampling=False):
         dummy_loader = [None] * (size // batch_size)
         return [dummy_loader, dummy_loader, dummy_loader]
+
+
+  
 
 class OTFSynDataSource(DataSource):
     """ On-the-fly generated synthetic data for training the subgraph model.
