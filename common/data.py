@@ -119,11 +119,14 @@ from deepsnap.batch import Batch
 
 
 class CustomGraphDataset:
-    def __init__(self, graph_pkl_path, query_size=5, subgraph_hops=1):
+    def __init__(self, graph_pkl_path, node_anchored=False, num_queries=32, subgraph_hops=1):
         self.graph_pkl_path = graph_pkl_path
-        self.query_size = query_size
+        self.node_anchored = node_anchored
+        self.num_queries = num_queries
         self.subgraph_hops = subgraph_hops
 
+     
+        self.query_size = 5  # You can make this configurable if needed
         # Load and clean graph once
         self.raw_data = self._load_graph()
         self.full_graph = self._build_graph()
