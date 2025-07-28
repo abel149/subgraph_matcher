@@ -174,7 +174,7 @@ class CustomGraphDataset:
 
     def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
         dataset = SubgraphGenerator(self, size=val_size)
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=train, num_workers=0)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=train, num_workers=0,collate_fn=Batch.collate())
         return (loader, loader, loader)  # Dummy loaders to match expected tuple
 
     def gen_batch(self, pos_graphs, _, __, is_train):
