@@ -67,7 +67,7 @@ def make_data_source(args):
         else:
             raise Exception("Error: unrecognized dataset")
     elif toks[0] == "graph":
-        data_source = data.GeneGraphDataSource(
+        data_source = data.CustomGraphDataset(
             graph_pkl_path=args.graph_pkl_path,
             node_anchored=args.node_anchored,
             num_queries=args.num_queries if hasattr(args, "num_queries") else 32,

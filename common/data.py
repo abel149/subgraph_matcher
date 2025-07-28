@@ -103,22 +103,25 @@ class DataSource:
     def gen_batch(batch_target, batch_neg_target, batch_neg_query, train):
         raise NotImplementedError
 
-class GeneGraphDataSource:
-    def __init__(self, graph_pkl_path, node_anchored=True, num_queries=32, subgraph_hops=1):
-        import pickle
-        with open(graph_pkl_path, "rb") as f:
-            raw_data = pickle.load(f)
+import pickle
+import torch
+import random
+import networkx as nx
+from deepsnap.graph import Graph as DSGraph
+from torch.utils.data import Dataset, DataLoader
 
-        self.node_anchored = node_anchored
-        self.num_queries = num_queries
-        self.subgraph_hops = subgraph_hops
-        self.raw_data = raw_data  # Save raw data only — not the graph object
+class CustomGraphDataset:
+    def __init__(self, graph_pkl_path):
+        self.graph_pkl_path = graph_pkl_path
+        self.raw_data = self._load_graph()
+        self.full_graph = self._build_graph()
+        self.query_size = 5  # number of nodes in each query subgraph
+
+    def _load_graph(self):
+        with open(self.graph_pkl_path, 'rb') as f:
+            return pickle.load(f)
 
     def _build_graph(self):
-        import networkx as nx
-        import torch
-        from deepsnap.graph import Graph as DSGraph
-
         G = nx.Graph()
         G.add_nodes_from(self.raw_data['nodes'])
 
@@ -140,51 +143,58 @@ class GeneGraphDataSource:
 
         return DSGraph(G)
 
-    def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
-        import random
-        import networkx as nx
-        from deepsnap.graph import Graph as DSGraph
-        from torch_geometric.data import Batch
+    def _generate_subgraph(self):
+        # Sample nodes and generate subgraph
+        node_ids = list(self.full_graph.G.nodes)
+        if len(node_ids) < self.query_size:
+            return None  # Skip if graph is too small
+        sampled_nodes = random.sample(node_ids, self.query_size)
+        subG = self.full_graph.G.subgraph(sampled_nodes).copy()
 
-        ds_graph = self._build_graph()  # build here inside the worker
-        G = ds_graph.G
+        for node in subG.nodes():
+            if 'node_feature' not in subG.nodes[node]:
+                subG.nodes[node]['node_feature'] = torch.tensor([1.0])
+        return DSGraph(subG)
 
-        query_nodes = random.sample(list(G.nodes), self.num_queries)
+    def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
+        dataset = SubgraphGenerator(self, size=val_size)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=train, num_workers=0)
+        return (loader, loader, loader)  # Dummy loaders to match expected tuple
 
-        pos_target_graph = DSGraph(G.copy())
-        pos_target_graph.idx = 0
-        pos_target = Batch.from_data_list([pos_target_graph])
+    def gen_batch(self, pos_graphs, _, __, is_train):
+        # Positive pairs: (query_subgraph, full_graph)
+        # Negative pairs: (random_subgraph, random_subgraph) — can be extended
+        pos_a = [g for g in pos_graphs]
+        pos_b = [self.full_graph for _ in pos_graphs]
 
-        query_graphs = []
-        for i, node in enumerate(query_nodes):
-            sub_nodes = nx.single_source_shortest_path_length(G, node, cutoff=self.subgraph_hops).keys()
-            subgraph_nx = G.subgraph(sub_nodes).copy()
+        neg_a = [self._generate_subgraph() for _ in pos_graphs]
+        neg_b = [self._generate_subgraph() for _ in pos_graphs]
 
-            if subgraph_nx.number_of_edges() == 0:
-                subgraph_nx.add_edge(node, node)
+        # Filter Nones due to undersized graph sampling
+        pos_a, pos_b = zip(*[(a, b) for a, b in zip(pos_a, pos_b) if a is not None])
+        neg_a, neg_b = zip(*[(a, b) for a, b in zip(neg_a, neg_b) if a is not None and b is not None])
 
-            g = DSGraph(subgraph_nx)
-            g.idx = i
-            query_graphs.append(g)
+        return (
+            torch.utils.data.dataloader.default_collate(pos_a) if pos_a else None,
+            torch.utils.data.dataloader.default_collate(pos_b) if pos_b else None,
+            torch.utils.data.dataloader.default_collate(neg_a),
+            torch.utils.data.dataloader.default_collate(neg_b)
+        )
 
-        pos_query = Batch.from_data_list(query_graphs)
 
-        def make_valid_dummy_graph(idx):
-            G_dummy = nx.Graph()
-            G_dummy.add_edge(0, 1)
-            g = DSGraph(G_dummy)
-            g.idx = idx
-            return g
+class SubgraphGenerator(Dataset):
+    def __init__(self, parent_dataset, size):
+        self.parent_dataset = parent_dataset
+        self.size = size
 
-        neg_target = Batch.from_data_list([make_valid_dummy_graph(i) for i in range(len(query_graphs))])
-        neg_query = Batch.from_data_list([make_valid_dummy_graph(i + len(query_graphs)) for i in range(len(query_graphs))])
+    def __len__(self):
+        return self.size
 
-        return pos_target, pos_query, neg_target, neg_query
-
-    def gen_data_loaders(self, size, batch_size, train=True, use_distributed_sampling=False):
-        dummy_loader = [None] * (size // batch_size)
-        return [dummy_loader, dummy_loader, dummy_loader]
-
+    def __getitem__(self, idx):
+        subgraph = None
+        while subgraph is None:
+            subgraph = self.parent_dataset._generate_subgraph()
+        return subgraph
 
   
 
