@@ -178,6 +178,7 @@ class CustomGraphDataset:
                     return DSGraph(subG)
         raise RuntimeError("Failed to generate valid subgraph after multiple retries.")
 
+
     def gen_data_loaders(self, val_size, batch_size, train=True):
         dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, val_size)
         loader = DataLoader(
@@ -188,6 +189,7 @@ class CustomGraphDataset:
             collate_fn=Batch.collate()
         )
         return (loader, loader, loader)
+
 
     def gen_batch(self, pos_graphs, _, __, is_train):
         pos_a = [g for g in pos_graphs]
