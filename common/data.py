@@ -109,18 +109,33 @@ import random
 import networkx as nx
 from deepsnap.graph import Graph as DSGraph
 from torch.utils.data import Dataset, DataLoader
+import random
+import pickle
+import torch
+import networkx as nx
+from torch.utils.data import Dataset, DataLoader
+from deepsnap.graph import Graph as DSGraph
+from deepsnap.batch import Batch
+
 
 class CustomGraphDataset:
-   
-    def __init__(self, graph_pkl_path, node_anchored=False, num_queries=32, subgraph_hops=1):
+    def __init__(self, graph_pkl_path, query_size=5, subgraph_hops=1):
         self.graph_pkl_path = graph_pkl_path
-        self.node_anchored = node_anchored
-        self.num_queries = num_queries
+        self.query_size = query_size
         self.subgraph_hops = subgraph_hops
 
+        # Load and clean graph once
         self.raw_data = self._load_graph()
         self.full_graph = self._build_graph()
-        self.query_size = 5  # You can make this configurable if needed
+
+        # Save connected components only once for reuse
+        self.connected_components = [
+            list(c) for c in nx.connected_components(self.full_graph.G)
+            if len(c) >= self.query_size
+        ]
+
+        if not self.connected_components:
+            raise RuntimeError("No connected components with enough nodes.")
 
     def _load_graph(self):
         with open(self.graph_pkl_path, 'rb') as f:
@@ -148,71 +163,71 @@ class CustomGraphDataset:
 
         return DSGraph(G)
 
-    def _generate_subgraph(self, retries=0, max_retries=10):
-    # Get all connected components with enough nodes
-        connected_components = [c for c in nx.connected_components(self.full_graph.G)
-                                if len(c) >= self.query_size]
+    def _generate_subgraph(self):
+        retries = 10
+        for _ in range(retries):
+            component_nodes = random.choice(self.connected_components)
+            if len(component_nodes) >= self.query_size:
+                sampled_nodes = random.sample(component_nodes, self.query_size)
+                subG = self.full_graph.G.subgraph(sampled_nodes).copy()
 
-        if not connected_components:
-            raise RuntimeError("No connected components with enough nodes.")
+                if subG.number_of_edges() > 0:
+                    for node in subG.nodes():
+                        if 'node_feature' not in subG.nodes[node]:
+                            subG.nodes[node]['node_feature'] = torch.tensor([1.0])
+                    return DSGraph(subG)
+        raise RuntimeError("Failed to generate valid subgraph after multiple retries.")
 
-        for _ in range(max_retries):
-            # Choose a random component
-            component_nodes = list(random.choice(connected_components))
-            sampled_nodes = random.sample(component_nodes, self.query_size)
-            subG = self.full_graph.G.subgraph(sampled_nodes).copy()
-
-            if subG.number_of_edges() > 0:
-                for node in subG.nodes():
-                    if 'node_feature' not in subG.nodes[node]:
-                        subG.nodes[node]['node_feature'] = torch.tensor([1.0])
-                return DSGraph(subG)
-
-        raise RuntimeError("Too many retries: cannot generate a valid subgraph.")
-
-
-
-    def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
-        dataset = SubgraphGenerator(self, size=val_size)
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=train, num_workers=0)
-        return (loader, loader, loader)  # Dummy loaders to match expected tuple
+    def gen_data_loaders(self, val_size, batch_size, train=True):
+        dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, val_size)
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=train,
+            num_workers=4,  # can now be >0
+            collate_fn=Batch.collate()
+        )
+        return (loader, loader, loader)
 
     def gen_batch(self, pos_graphs, _, __, is_train):
-        # Positive pairs: (query_subgraph, full_graph)
-        # Negative pairs: (random_subgraph, random_subgraph) — can be extended
         pos_a = [g for g in pos_graphs]
         pos_b = [self.full_graph for _ in pos_graphs]
 
         neg_a = [self._generate_subgraph() for _ in pos_graphs]
         neg_b = [self._generate_subgraph() for _ in pos_graphs]
 
-        # Filter Nones due to undersized graph sampling
-        pos_a, pos_b = zip(*[(a, b) for a, b in zip(pos_a, pos_b) if a is not None])
-        neg_a, neg_b = zip(*[(a, b) for a, b in zip(neg_a, neg_b) if a is not None and b is not None])
-
         return (
-            torch.utils.data.dataloader.default_collate(pos_a) if pos_a else None,
-            torch.utils.data.dataloader.default_collate(pos_b) if pos_b else None,
+            torch.utils.data.dataloader.default_collate(pos_a),
+            torch.utils.data.dataloader.default_collate(pos_b),
             torch.utils.data.dataloader.default_collate(neg_a),
             torch.utils.data.dataloader.default_collate(neg_b)
         )
 
 
 class SubgraphGenerator(Dataset):
-    def __init__(self, parent_dataset, size):
-        self.parent_dataset = parent_dataset
+    def __init__(self, full_graph, connected_components, query_size, size):
+        self.full_graph = full_graph
+        self.connected_components = connected_components
+        self.query_size = query_size
         self.size = size
 
     def __len__(self):
         return self.size
 
     def __getitem__(self, idx):
-        subgraph = None
-        while subgraph is None:
-            subgraph = self.parent_dataset._generate_subgraph()
-        return subgraph
+        retries = 10
+        for _ in range(retries):
+            component_nodes = random.choice(self.connected_components)
+            if len(component_nodes) >= self.query_size:
+                sampled_nodes = random.sample(component_nodes, self.query_size)
+                subG = self.full_graph.G.subgraph(sampled_nodes).copy()
 
-  
+                if subG.number_of_edges() > 0:
+                    for node in subG.nodes():
+                        if 'node_feature' not in subG.nodes[node]:
+                            subG.nodes[node]['node_feature'] = torch.tensor([1.0])
+                    return DSGraph(subG)
+        raise RuntimeError("Subgraph generation failed.")
 
 class OTFSynDataSource(DataSource):
     """ On-the-fly generated synthetic data for training the subgraph model.
