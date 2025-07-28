@@ -182,7 +182,7 @@ class CustomGraphDataset:
         raise RuntimeError("Failed to generate valid subgraph after multiple retries.")
 
 
-    def gen_data_loaders(self, val_size, batch_size, train=True):
+    def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
         dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, val_size)
         loader = DataLoader(
             dataset,
