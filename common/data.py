@@ -149,24 +149,27 @@ class CustomGraphDataset:
         return DSGraph(G)
 
     def _generate_subgraph(self, retries=0, max_retries=10):
-        node_ids = list(self.full_graph.G.nodes)
-        
-        if len(node_ids) < self.query_size:
-            return None  # Skip if graph is too small
+    # Get all connected components with enough nodes
+        connected_components = [c for c in nx.connected_components(self.full_graph.G)
+                                if len(c) >= self.query_size]
 
-        sampled_nodes = random.sample(node_ids, self.query_size)
-        subG = self.full_graph.G.subgraph(sampled_nodes).copy()
+        if not connected_components:
+            raise RuntimeError("No connected components with enough nodes.")
 
-        if subG.number_of_edges() == 0:
-            if retries >= max_retries:
-                raise RuntimeError("Too many retries: cannot generate a connected subgraph.")
-            return self._generate_subgraph(retries=retries + 1, max_retries=max_retries)
+        for _ in range(max_retries):
+            # Choose a random component
+            component_nodes = list(random.choice(connected_components))
+            sampled_nodes = random.sample(component_nodes, self.query_size)
+            subG = self.full_graph.G.subgraph(sampled_nodes).copy()
 
-        for node in subG.nodes():
-            if 'node_feature' not in subG.nodes[node]:
-                subG.nodes[node]['node_feature'] = torch.tensor([1.0])
+            if subG.number_of_edges() > 0:
+                for node in subG.nodes():
+                    if 'node_feature' not in subG.nodes[node]:
+                        subG.nodes[node]['node_feature'] = torch.tensor([1.0])
+                return DSGraph(subG)
 
-        return DSGraph(subG)
+        raise RuntimeError("Too many retries: cannot generate a valid subgraph.")
+
 
 
     def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
