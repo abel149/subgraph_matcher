@@ -148,18 +148,26 @@ class CustomGraphDataset:
 
         return DSGraph(G)
 
-    def _generate_subgraph(self):
-        # Sample nodes and generate subgraph
+    def _generate_subgraph(self, retries=0, max_retries=10):
         node_ids = list(self.full_graph.G.nodes)
+        
         if len(node_ids) < self.query_size:
             return None  # Skip if graph is too small
+
         sampled_nodes = random.sample(node_ids, self.query_size)
         subG = self.full_graph.G.subgraph(sampled_nodes).copy()
+
+        if subG.number_of_edges() == 0:
+            if retries >= max_retries:
+                raise RuntimeError("Too many retries: cannot generate a connected subgraph.")
+            return self._generate_subgraph(retries=retries + 1, max_retries=max_retries)
 
         for node in subG.nodes():
             if 'node_feature' not in subG.nodes[node]:
                 subG.nodes[node]['node_feature'] = torch.tensor([1.0])
+
         return DSGraph(subG)
+
 
     def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
         dataset = SubgraphGenerator(self, size=val_size)
