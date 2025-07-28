@@ -111,12 +111,15 @@ from deepsnap.graph import Graph as DSGraph
 from torch.utils.data import Dataset, DataLoader
 
 class CustomGraphDataset:
-    def __init__(self, graph_pkl_path):
+   
+    def __init__(self, graph_pkl_path, node_anchored=False, subgraph_hops=1):
         self.graph_pkl_path = graph_pkl_path
+        self.node_anchored = node_anchored  # ← Now accepted
+        self.subgraph_hops = subgraph_hops
         self.raw_data = self._load_graph()
         self.full_graph = self._build_graph()
         self.query_size = 5  # number of nodes in each query subgraph
-        self.node_anchored = node_anchored
+
 
     def _load_graph(self):
         with open(self.graph_pkl_path, 'rb') as f:
