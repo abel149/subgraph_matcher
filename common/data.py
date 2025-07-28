@@ -116,6 +116,7 @@ class CustomGraphDataset:
         self.raw_data = self._load_graph()
         self.full_graph = self._build_graph()
         self.query_size = 5  # number of nodes in each query subgraph
+        self.node_anchored = node_anchored
 
     def _load_graph(self):
         with open(self.graph_pkl_path, 'rb') as f:
