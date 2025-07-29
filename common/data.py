@@ -202,10 +202,21 @@ class CustomGraphDataset:
     
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_train=True):
         def unpack_batches(batch_pair):
+            from torch_geometric.data import Batch
+
             if isinstance(batch_pair, tuple) and len(batch_pair) == 2:
-                return batch_pair[0], batch_pair[1]
+                if isinstance(batch_pair[0], Batch) and isinstance(batch_pair[1], Batch):
+                    return batch_pair[0], batch_pair[1]
+                else:
+                    raise ValueError("Tuple elements must be torch_geometric.data.Batch.")
+            elif isinstance(batch_pair, Batch):
+                # This means only one Batch was passed instead of (anchor, query)
+                raise ValueError("Expected a tuple of (anchor_batch, query_batch), but got a single Batch. Check the data loader.")
             else:
-                raise ValueError("Expected tuple of (anchor_batch, query_batch).")
+                raise ValueError(f"Expected a tuple or a Batch, but got: {type(batch_pair)}")
+
+        print("DEBUG type of batch_target:", type(batch_target))
+        print("DEBUG content of batch_target:", batch_target)
 
         # Unpack each batch pair
         pos_a, pos_b = unpack_batches(batch_target)
