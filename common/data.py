@@ -165,21 +165,31 @@ class CustomGraphDataset:
             subgraph_nodes = list(neighbors.keys())
             subgraph = self.graph.subgraph(subgraph_nodes)
 
+            # Only continue if query subgraph is valid
             if subgraph.number_of_edges() > 0 and subgraph.number_of_nodes() >= self.query_size:
                 break
 
         query_graph = DSGraph(subgraph)
 
-        # Random target component
-        component = random.choice(self.connected_components)
-        component_nodes = random.sample(component, self.query_size)
-        target_subgraph = self.graph.subgraph(component_nodes)
+        # Retry until target subgraph has at least one edge
+        while True:
+            component = random.choice(self.connected_components)
+            if len(component) < self.query_size:
+                continue  # skip small components
+
+            component_nodes = random.sample(component, self.query_size)
+            target_subgraph = self.graph.subgraph(component_nodes)
+
+            if target_subgraph.number_of_edges() > 0:
+                break
+
         target_graph = DSGraph(target_subgraph)
 
         anchors = torch.tensor([node], dtype=torch.long)
         label = torch.tensor([1], dtype=torch.float)
 
         return query_graph, target_graph, anchors, label
+
 
 
     def sample_subgraph(self, graph, anchor):
