@@ -201,32 +201,35 @@ class CustomGraphDataset:
         
     
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_train=True):
-    # Check that batches are deepsnap or torch_geometric batches
+        # Helper to extract anchor and query subgraphs from a batch
         def extract_pair(batch):
             try:
-                graphs = batch.to_data_list()  # Deepsnap batch
+                samples = batch.to_data_list()  # Deepsnap or Pyg batch
             except AttributeError:
-                graphs = batch  # Already a list
-            # Expect each item to have .anchor and .query
+                samples = batch  # Already a list
+
             a_list, b_list = [], []
-            for g in graphs:
-                a_list.append(g.anchor)
-                b_list.append(g.query)
+            for sample in samples:
+                if hasattr(sample, "anchor") and hasattr(sample, "query"):
+                    a_list.append(sample.anchor)
+                    b_list.append(sample.query)
+                else:
+                    raise ValueError("Each sample must have 'anchor' and 'query' attributes.")
             return a_list, b_list
 
+        # Extract pairs from each batch
         pos_a_list, pos_b_list = extract_pair(batch_target)
         neg_a_list, neg_b_list = extract_pair(batch_neg_target)
+        # batch_neg_query is not used for now; include if needed
 
-        # Optional: You can also support separate negative query (if needed)
-        # For now, we ignore batch_neg_query unless you want to use it
-
-        # Wrap with custom batching (no default_collate)
+        # Manually create batches
         pos_a = self.create_subgraph_batch(pos_a_list)
         pos_b = self.create_subgraph_batch(pos_b_list)
         neg_a = self.create_subgraph_batch(neg_a_list)
         neg_b = self.create_subgraph_batch(neg_b_list)
 
         return pos_a, pos_b, neg_a, neg_b
+
 
 
 
