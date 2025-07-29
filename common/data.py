@@ -232,10 +232,10 @@ class CustomGraphDataset:
 
     def gen_batch(self, batch, _, __, is_train):
         def sample_subgraph(graph, size):
-            for _ in range(100):  # retry up to 100 times
-                start_node = random.choice(list(graph.G.nodes))
+            for _ in range(100):
+                start_node = random.choice(list(graph.nodes))  # ✅ FIXED HERE
                 neigh = [start_node]
-                frontier = list(set(graph.G.neighbors(start_node)) - set(neigh))
+                frontier = list(set(graph.neighbors(start_node)) - set(neigh))
                 visited = set(neigh)
 
                 while len(neigh) < size:
@@ -244,21 +244,21 @@ class CustomGraphDataset:
                     new_node = random.choice(frontier)
                     neigh.append(new_node)
                     visited.add(new_node)
-                    frontier += list(set(graph.G.neighbors(new_node)) - visited)
+                    frontier += list(set(graph.neighbors(new_node)) - visited)
                     frontier = list(set(frontier))
 
-                subg = graph.G.subgraph(neigh).copy()
+                subg = graph.subgraph(neigh).copy()
                 if subg.number_of_edges() == 0:
                     continue
 
                 if self.node_anchored:
                     anchor = neigh[0]
-                    for v in subg.nodes():
+                    for v in subg.nodes:
                         subg.nodes[v]["node_feature"] = (
                             torch.ones(1) if anchor == v else torch.zeros(1)
                         )
 
-                return DSGraph(subg)
+                return DSGraph(subg)  # ✅ Wrap back into DSGraph
             raise RuntimeError("Failed to sample valid subgraph")
 
         augmenter = feature_preprocess.FeatureAugment()
