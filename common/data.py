@@ -203,21 +203,25 @@ class CustomGraphDataset:
         pos_a, pos_b, neg_a, neg_b = [], [], [], []
 
         for pos_sample, neg_sample, query_sample in zip(batch_target, batch_neg_target, batch_neg_query):
-            print("query_sample type:", type(query_sample))
-            print("query_sample:", query_sample)
+            query_batch = query_sample  # This is a DeepSnap Batch
+            query_graphs = query_batch.to_data_list()  # List[Graph]
+            print("query_sample graphs:", len(query_sample.to_data_list()))
 
-            query_graph = query_sample  # DeepSnap Graph
-            target_graph = pos_sample
-            neg_graph = neg_sample
+            # Assuming each batch only has 1 graph (otherwise loop)
+            assert len(query_graphs) == 1, "Expected single graph in each batch"
+            query_graph = query_graphs[0]
 
-            label = query_graph.node_label  # Or whatever attribute stores the label
+            # Do the same for pos_sample and neg_sample if needed
+            pos_graph = pos_sample.to_data_list()[0]
+            neg_graph = neg_sample.to_data_list()[0]
 
-            # If label is a tensor (e.g., tensor([0])), get scalar with `.item()`
-            if is_training and label.item() == 0:
-                continue
+            # Safely access label
+            if is_training and hasattr(query_graph, 'node_label'):
+                if query_graph.node_label.item() == 0:
+                    continue
 
             pos_a.append(query_graph)
-            pos_b.append(target_graph)
+            pos_b.append(pos_graph)
             neg_a.append(query_graph)
             neg_b.append(neg_graph)
 
@@ -227,6 +231,7 @@ class CustomGraphDataset:
             Batch.from_data_list(neg_a),
             Batch.from_data_list(neg_b),
         )
+
 
     # Optional: collate_fn if you want to use __getitem__ with DataLoader elsewhere
     @staticmethod
