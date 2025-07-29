@@ -166,27 +166,22 @@ class CustomGraphDataset:
                     return DSGraph(subG)
         raise RuntimeError("Failed to generate valid subgraph.")
 
- 
-    def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
-        # Create dataset only once (since your case is disk-based single graph)
-        dataset = SubgraphGenerator(self.full_graph.G, self.connected_components, self.query_size, val_size)
+    def dsgraph_triplet_collate(batch):
+        queries = [item['query'] for item in batch]
+        positives = [item['pos'] for item in batch]
+        negatives = [item['neg'] for item in batch]
+        return Batch.collate(queries), Batch.collate(positives), Batch.collate(negatives)
 
-        def dsgraph_collate_fn(batch):
-            return Batch.collate(batch)  # DeepSnap collate
-
-        # Create a single DataLoader
+    def gen_data_loaders(self, val_size, batch_size, train=True):
+        dataset = SubgraphGenerator(self.full_graph_nx, self.connected_components, self.query_size, val_size)
         loader = DataLoader(
             dataset,
             batch_size=batch_size,
             shuffle=train,
             num_workers=0,
-            collate_fn=dsgraph_collate_fn
+            collate_fn=dsgraph_triplet_collate
         )
-
-        # Now repeat this loader 3 times like OTF loader expects:
-        # batch_target, batch_neg_target, batch_neg_query
-        # NOTE: All three point to the same loader in your case
-        return [loader, loader, loader]
+        return loader
 
 
 
@@ -286,7 +281,6 @@ class CustomGraphDataset:
         neg_query = augmenter.augment(neg_query).to(utils.get_device())
 
         return pos_target, pos_query, batch_neg_target, neg_query
-
 class SubgraphGenerator(Dataset):
     def __init__(self, full_graph_nx, connected_components, query_size, size):
         self.full_graph_nx = full_graph_nx
@@ -297,21 +291,69 @@ class SubgraphGenerator(Dataset):
     def __len__(self):
         return self.size
 
+    def _sample_subgraph(self, graph, size):
+        # BFS or random walk sampling for subgraph of given size
+        for _ in range(10):
+            start_node = random.choice(list(graph.nodes))
+            visited = {start_node}
+            queue = [start_node]
+            while queue and len(visited) < size:
+                node = queue.pop(0)
+                neighbors = set(graph.neighbors(node)) - visited
+                neighbors = list(neighbors)
+                random.shuffle(neighbors)
+                for nbr in neighbors:
+                    if len(visited) >= size:
+                        break
+                    visited.add(nbr)
+                    queue.append(nbr)
+            subg = graph.subgraph(visited).copy()
+            if subg.number_of_edges() > 0 and nx.is_connected(subg):
+                return subg
+        # fallback: largest connected component
+        largest_cc = max(nx.connected_components(graph), key=len)
+        return graph.subgraph(largest_cc).copy()
+
     def __getitem__(self, idx):
         retries = 10
         for _ in range(retries):
+            # Pick a random connected component for query + pos
             component_nodes = random.choice(self.connected_components)
-            if len(component_nodes) >= self.query_size:
-                sampled_nodes = random.sample(component_nodes, self.query_size)
-                subG = self.full_graph_nx.subgraph(sampled_nodes).copy()
+            if len(component_nodes) < self.query_size * 2:
+                continue
 
-                if subG.number_of_edges() > 0:
-                    for node in subG.nodes():
-                        if 'node_feature' not in subG.nodes[node]:
-                            subG.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
-                    return DSGraph(subG)
-        raise RuntimeError("Subgraph generation failed.")
+            # Sample query subgraph
+            query_nodes = random.sample(component_nodes, self.query_size)
+            query_subg = self.full_graph_nx.subgraph(query_nodes).copy()
 
+            # Sample positive subgraph overlapping with query (e.g. some common nodes)
+            overlap_nodes = set(query_nodes[:self.query_size // 2])
+            remaining_nodes = set(component_nodes) - overlap_nodes
+            pos_nodes = list(overlap_nodes) + random.sample(remaining_nodes, self.query_size - len(overlap_nodes))
+            pos_subg = self.full_graph_nx.subgraph(pos_nodes).copy()
+
+            # Sample negative subgraph from different component
+            neg_component = random.choice(self.connected_components)
+            while neg_component == component_nodes or len(neg_component) < self.query_size:
+                neg_component = random.choice(self.connected_components)
+            neg_nodes = random.sample(neg_component, self.query_size)
+            neg_subg = self.full_graph_nx.subgraph(neg_nodes).copy()
+
+            # Check edge counts and assign node features if missing
+            for g in [query_subg, pos_subg, neg_subg]:
+                if g.number_of_edges() == 0:
+                    break
+                for node in g.nodes():
+                    if 'node_feature' not in g.nodes[node]:
+                        g.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
+            else:
+                # All good, wrap and return
+                return {
+                    'query': DSGraph(query_subg),
+                    'pos': DSGraph(pos_subg),
+                    'neg': DSGraph(neg_subg)
+                }
+        raise RuntimeError("Failed to generate triplet subgraphs")
 
 class OTFSynDataSource(DataSource):
     """ On-the-fly generated synthetic data for training the subgraph model.
