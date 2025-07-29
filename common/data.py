@@ -159,26 +159,28 @@ class CustomGraphDataset:
         return 100000
 
     def __getitem__(self, idx):
-        # Not used in training, but can be used for quick single samples
-        anchor_node = random.choice(self.nodes)
-        sub_nodes = nx.single_source_shortest_path_length(self.graph, anchor_node, cutoff=self.radius)
-        subgraph_nodes = list(sub_nodes.keys())
-        subgraph = self.graph.subgraph(subgraph_nodes).copy()
+        while True:
+            node = random.choice(self.nodes)
+            neighbors = nx.single_source_shortest_path_length(self.graph, node, cutoff=self.radius)
+            subgraph_nodes = list(neighbors.keys())
+            subgraph = self.graph.subgraph(subgraph_nodes)
+
+            if subgraph.number_of_edges() > 0 and subgraph.number_of_nodes() >= self.query_size:
+                break
+
         query_graph = DSGraph(subgraph)
 
-        if self.node_anchored:
-            for n in query_graph.G.nodes:
-                query_graph.G.nodes[n]["node_feature"] = torch.tensor([1.0]) if n == anchor_node else torch.tensor([0.0])
+        # Random target component
+        component = random.choice(self.connected_components)
+        component_nodes = random.sample(component, self.query_size)
+        target_subgraph = self.graph.subgraph(component_nodes)
+        target_graph = DSGraph(target_subgraph)
 
-        target_graph = DSGraph(self.graph)
-        label = 1
+        anchors = torch.tensor([node], dtype=torch.long)
+        label = torch.tensor([1], dtype=torch.float)
 
-        return {
-            "query": query_graph,
-            "target": target_graph,
-            "anchor": anchor_node,
-            "label": label,
-        }
+        return query_graph, target_graph, anchors, label
+
 
     def sample_subgraph(self, graph, anchor):
         sub_nodes = nx.single_source_shortest_path_length(graph, anchor, cutoff=self.radius)
@@ -186,51 +188,28 @@ class CustomGraphDataset:
         subgraph = graph.subgraph(subgraph_nodes).copy()
         return subgraph
 
-    def gen_batch(self, batch_size):
-        pos_queries = []
-        pos_targets = []
-        neg_queries = []
-        neg_targets = []
+    def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_training):
+        pos_a, pos_b, neg_a, neg_b = [], [], [], []
 
-        for _ in range(batch_size):
-            # Positive pair
-            anchor = random.choice(self.nodes)
-            pos_query_graph = self.sample_subgraph(self.graph, anchor)
-            pos_target_graph = self.graph  # full graph as target
+        for pos_sample, neg_sample, query_sample in zip(batch_target, batch_neg_target, batch_neg_query):
+            query_graph, _, anchor, label = query_sample
+            _, target_graph, _, _ = pos_sample
+            _, neg_graph, _, _ = neg_sample
 
-            pos_query = DSGraph(pos_query_graph)
-            pos_target = DSGraph(pos_target_graph)
+            if is_training and label.item() == 0:
+                continue
 
-            if self.node_anchored:
-                for n in pos_query.G.nodes:
-                    pos_query.G.nodes[n]["node_feature"] = torch.tensor([1.0]) if n == anchor else torch.tensor([0.0])
+            pos_a.append(query_graph)
+            pos_b.append(target_graph)
+            neg_a.append(query_graph)
+            neg_b.append(neg_graph)
 
-            # Negative pair: sample a different anchor
-            neg_anchor = random.choice(self.nodes)
-            while neg_anchor == anchor:
-                neg_anchor = random.choice(self.nodes)
-            neg_query_graph = self.sample_subgraph(self.graph, neg_anchor)
-            neg_target_graph = self.graph
-
-            neg_query = DSGraph(neg_query_graph)
-            neg_target = DSGraph(neg_target_graph)
-
-            if self.node_anchored:
-                for n in neg_query.G.nodes:
-                    neg_query.G.nodes[n]["node_feature"] = torch.tensor([1.0]) if n == neg_anchor else torch.tensor([0.0])
-
-            pos_queries.append(pos_query)
-            pos_targets.append(pos_target)
-            neg_queries.append(neg_query)
-            neg_targets.append(neg_target)
-
-        # Batch all graphs
-        pos_query_batch = Batch.from_data_list(pos_queries)
-        pos_target_batch = Batch.from_data_list(pos_targets)
-        neg_query_batch = Batch.from_data_list(neg_queries)
-        neg_target_batch = Batch.from_data_list(neg_targets)
-
-        return pos_target_batch, pos_query_batch, neg_target_batch, neg_query_batch
+        return (
+            Batch.from_data_list(pos_a) if pos_a else None,
+            Batch.from_data_list(pos_b) if pos_b else None,
+            Batch.from_data_list(neg_a),
+            Batch.from_data_list(neg_b),
+        )
 
     # Optional: collate_fn if you want to use __getitem__ with DataLoader elsewhere
     def my_collate_fn(batch):
