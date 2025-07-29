@@ -165,12 +165,12 @@ def train_loop(args):
         clf_opt = None
 
     data_source = make_data_source(args)
-    loader = data_source.gen_data_loaders(args.val_size, args.batch_size, train=False)
+    loaders = data_source.gen_data_loaders(args.val_size, args.batch_size,
+        train=False, use_distributed_sampling=False)
     test_pts = []
-
-    for batch in loader:
-        print("Type of batch from loader:", type(batch))
-        pos_a, pos_b, neg_a, neg_b = data_source.gen_batch(batch, None, None, is_train=False)
+    for batch_target, batch_neg_target, batch_neg_query in zip(*loaders):
+        pos_a, pos_b, neg_a, neg_b = data_source.gen_batch(batch_target,
+            batch_neg_target, batch_neg_query, False)
         if pos_a:
             pos_a = pos_a.to(torch.device("cpu"))
             pos_b = pos_b.to(torch.device("cpu"))
