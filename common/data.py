@@ -170,64 +170,69 @@ class CustomGraphDataset:
         # Batch individual graphs into a batched graph object
         return Batch.from_data_list(batch)
 
-    def gen_data_loaders(self, train_size, val_size, test_size, batch_size, train=True, use_distributed_sampling=False):
+    def gen_data_loaders(self, size, batch_size, train=True, use_distributed_sampling=False):
         """
-        Generate train, validation, and test DataLoaders.
+        Generate 3 loaders that provide batches corresponding to:
+        - batch_target
+        - batch_neg_target
+        - batch_neg_query
 
         Args:
-            train_size (int): Number of samples in training dataset.
-            val_size (int): Number of samples in validation dataset.
-            test_size (int): Number of samples in test dataset.
-            batch_size (int): Batch size.
-            train (bool): Whether training mode (affects shuffle).
-            use_distributed_sampling (bool): Use DistributedSampler if True.
+            size (int): total number of samples per loader
+            batch_size (int): batch size per loader
+            train (bool): shuffle flag for train loader
+            use_distributed_sampling (bool): distributed sampler usage
 
         Returns:
-            tuple: (train_loader, val_loader, test_loader)
+            list of 3 DataLoader objects (target, neg_target, neg_query)
         """
 
-        train_dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, train_size)
-        val_dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, val_size)
-        test_dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, test_size)
+        # Create 3 datasets -- for example all same size, can be different logic
+        target_dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, size)
+        neg_target_dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, size)
+        neg_query_dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, size)
 
-        train_sampler = DistributedSampler(train_dataset) if use_distributed_sampling else None
-        val_sampler = DistributedSampler(val_dataset) if use_distributed_sampling else None
-        test_sampler = DistributedSampler(test_dataset) if use_distributed_sampling else None
+        target_sampler = DistributedSampler(target_dataset) if use_distributed_sampling else None
+        neg_target_sampler = DistributedSampler(neg_target_dataset) if use_distributed_sampling else None
+        neg_query_sampler = DistributedSampler(neg_query_dataset) if use_distributed_sampling else None
 
-        train_loader = DataLoader(
-            train_dataset,
+        def collate_fn(batch):
+            return Batch.from_data_list(batch)
+
+        target_loader = DataLoader(
+            target_dataset,
             batch_size=batch_size,
-            shuffle=(train and train_sampler is None),
-            sampler=train_sampler,
-            collate_fn=self.graph_collate_fn,
+            shuffle=(train and target_sampler is None),
+            sampler=target_sampler,
+            collate_fn=collate_fn,
             num_workers=4,
             pin_memory=True,
             drop_last=True
         )
 
-        val_loader = DataLoader(
-            val_dataset,
+        neg_target_loader = DataLoader(
+            neg_target_dataset,
             batch_size=batch_size,
-            shuffle=False,
-            sampler=val_sampler,
-            collate_fn=self.graph_collate_fn,
+            shuffle=(train and neg_target_sampler is None),
+            sampler=neg_target_sampler,
+            collate_fn=collate_fn,
             num_workers=4,
             pin_memory=True,
-            drop_last=False
+            drop_last=True
         )
 
-        test_loader = DataLoader(
-            test_dataset,
+        neg_query_loader = DataLoader(
+            neg_query_dataset,
             batch_size=batch_size,
-            shuffle=False,
-            sampler=test_sampler,
-            collate_fn=self.graph_collate_fn,
+            shuffle=(train and neg_query_sampler is None),
+            sampler=neg_query_sampler,
+            collate_fn=collate_fn,
             num_workers=4,
             pin_memory=True,
-            drop_last=False
+            drop_last=True
         )
 
-        return train_loader, val_loader, test_loader
+        return [target_loader, neg_target_loader, neg_query_loader]
 
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_train):
         def sample_subgraph(graph, offset=0, use_precomp_sizes=False,
