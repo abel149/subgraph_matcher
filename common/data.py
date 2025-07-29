@@ -218,31 +218,28 @@ class CustomGraphDataset:
         return Batch.from_data_list(batch)
 
     def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
-        dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, val_size)
+        dataset = SubgraphGenerator(
+            self.full_graph, self.connected_components, self.query_size, val_size
+        )
         loader = DataLoader(
             dataset,
             batch_size=batch_size,
             shuffle=train,
-            num_workers=0,  # important for workflow stability, esp. in CI/CD
+            num_workers=0,  # IMPORTANT: 0 for GitHub/Docker compatibility
             collate_fn=self.graph_collate_fn
         )
-        return loader, loader, [None] * (val_size // batch_size)
+        return loader
 
-    def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_train):
-        def sample_subgraph(graph, offset=0, use_precomp_sizes=False,
-                            filter_negs=False, supersample_small_graphs=False,
-                            neg_target=None, hard_neg_idxs=None):
-            done = False
-            n_tries = 0
-            while not done and n_tries < 100:
-                n_tries += 1
-                size = self.query_size
+    def gen_batch(self, batch, _, __, is_train):
+        def sample_subgraph(graph, size):
+            for _ in range(100):  # retry up to 100 times
                 start_node = random.choice(list(graph.G.nodes))
                 neigh = [start_node]
                 frontier = list(set(graph.G.neighbors(start_node)) - set(neigh))
                 visited = set(neigh)
+
                 while len(neigh) < size:
-                    if len(frontier) == 0:
+                    if not frontier:
                         break
                     new_node = random.choice(frontier)
                     neigh.append(new_node)
@@ -250,76 +247,69 @@ class CustomGraphDataset:
                     frontier += list(set(graph.G.neighbors(new_node)) - visited)
                     frontier = list(set(frontier))
 
-                subgraph = graph.G.subgraph(neigh).copy()
-
-                if subgraph.number_of_edges() == 0:
-                    continue  # Retry sampling if invalid
+                subg = graph.G.subgraph(neigh).copy()
+                if subg.number_of_edges() == 0:
+                    continue
 
                 if self.node_anchored:
                     anchor = neigh[0]
-                    for v in subgraph.nodes():
-                        subgraph.nodes[v]["node_feature"] = (
+                    for v in subg.nodes():
+                        subg.nodes[v]["node_feature"] = (
                             torch.ones(1) if anchor == v else torch.zeros(1)
                         )
 
-                if filter_negs and is_train and neg_target is not None:
-                    matcher = nx.algorithms.isomorphism.GraphMatcher(neg_target.G, subgraph)
-                    if not matcher.subgraph_is_isomorphic():
-                        done = True
-                else:
-                    done = True
-
-            return graph, DSGraph(subgraph)
+                return DSGraph(subg)
+            raise RuntimeError("Failed to sample valid subgraph")
 
         augmenter = feature_preprocess.FeatureAugment()
 
-        # Positive target and query
-        pos_target = batch_target
-        pos_target, pos_query = pos_target.apply_transform_multi(sample_subgraph)
+        # Positive pair
+        pos_target = batch
+        pos_target_list = []
+        pos_query_list = []
 
-        # Negative target and queries
-        neg_target = batch_neg_target
-        hard_neg_idxs = set(
-            random.sample(range(len(neg_target.G)), int(len(neg_target.G) * 0.5))
-        )
+        for g in pos_target.G:
+            g_pos = sample_subgraph(g, self.query_size)
+            q_pos = sample_subgraph(g, self.query_size)
+            pos_target_list.append(g_pos)
+            pos_query_list.append(q_pos)
 
-        batch_neg_query = Batch.from_data_list(
-            [
-                DSGraph(self._generate_subgraph().G if i not in hard_neg_idxs else g.G)
-                for i, g in enumerate(neg_target.G)
-            ]
-        )
-        for i, g in enumerate(batch_neg_query.G):
-            g.graph["idx"] = i
+        pos_target = Batch.from_data_list(pos_target_list)
+        pos_query = Batch.from_data_list(pos_query_list)
 
-        _, neg_query = batch_neg_query.apply_transform_multi(
-            sample_subgraph, hard_neg_idxs=hard_neg_idxs
-        )
+        # Negative pair (random graphs from self._generate_subgraph)
+        neg_target_list = []
+        neg_query_list = []
 
-        # Add anchors if needed
-        if self.node_anchored:
-            def add_anchor(g, anchors=None):
-                if anchors is not None:
-                    anchor = anchors[g.G.graph["idx"]]
-                else:
-                    anchor = random.choice(list(g.G.nodes))
-                for v in g.G.nodes:
-                    if "node_feature" not in g.G.nodes[v]:
-                        g.G.nodes[v]["node_feature"] = (
-                            torch.ones(1) if anchor == v else torch.zeros(1)
-                        )
-                return g
+        for _ in range(len(pos_target_list)):
+            neg_g = self._generate_subgraph()
+            q_neg = self._generate_subgraph()
 
-            neg_target = neg_target.apply_transform(add_anchor)
+            if self.node_anchored:
+                anchor = random.choice(list(neg_g.G.nodes))
+                for v in neg_g.G.nodes:
+                    neg_g.G.nodes[v]["node_feature"] = (
+                        torch.ones(1) if anchor == v else torch.zeros(1)
+                    )
+                anchor = random.choice(list(q_neg.G.nodes))
+                for v in q_neg.G.nodes:
+                    q_neg.G.nodes[v]["node_feature"] = (
+                        torch.ones(1) if anchor == v else torch.zeros(1)
+                    )
 
-        # Augment features and move to device
+            neg_target_list.append(neg_g)
+            neg_query_list.append(q_neg)
+
+        neg_target = Batch.from_data_list(neg_target_list)
+        neg_query = Batch.from_data_list(neg_query_list)
+
+        # Augment and move to device
         pos_target = augmenter.augment(pos_target).to(utils.get_device())
         pos_query = augmenter.augment(pos_query).to(utils.get_device())
         neg_target = augmenter.augment(neg_target).to(utils.get_device())
         neg_query = augmenter.augment(neg_query).to(utils.get_device())
 
         return pos_target, pos_query, neg_target, neg_query
-
 
 # Make sure SubgraphGenerator class is defined as you had before, or adapt it if needed.
 
