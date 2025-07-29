@@ -200,33 +200,38 @@ class CustomGraphDataset:
 
         
     
-    def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_training):
-        # Convert each batch to list of DeepSNAP Graphs
-        target_list = batch_target.to_data_list()
-        neg_target_list = batch_neg_target.to_data_list()
-        query_list = batch_neg_query.to_data_list()
+    def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_train=True):
+        # Handle tuple input: (target, query)
+        if isinstance(batch_target, tuple):
+            target_batch, query_batch = batch_target
+        else:
+            raise TypeError(f"Expected batch_target to be a tuple, got {type(batch_target)}")
 
-        pos_a, pos_b, neg_a, neg_b = [], [], [], []
+        if isinstance(batch_neg_target, tuple):
+            neg_target_batch, neg_query_batch = batch_neg_target
+        else:
+            raise TypeError(f"Expected batch_neg_target to be a tuple, got {type(batch_neg_target)}")
 
-        for query_graph, target_graph, neg_graph in zip(query_list, target_list, neg_target_list):
-            # Optional label filtering (if label exists on graph)
-            label = getattr(query_graph, 'label', 1)
-            if is_training and isinstance(label, torch.Tensor) and label.item() == 0:
-                continue
+        if isinstance(batch_neg_query, tuple):
+            dummy_batch, dummy_query_batch = batch_neg_query
+        else:
+            raise TypeError(f"Expected batch_neg_query to be a tuple, got {type(batch_neg_query)}")
 
-            # Append positive and negative samples
-            pos_a.append(query_graph)
-            pos_b.append(target_graph)
-            neg_a.append(query_graph)
-            neg_b.append(neg_graph)
+        # Convert to lists if needed
+        target_graphs = target_batch.to_data_list() if hasattr(target_batch, "to_data_list") else target_batch
+        query_graphs = query_batch.to_data_list() if hasattr(query_batch, "to_data_list") else query_batch
+        neg_target_graphs = neg_target_batch.to_data_list() if hasattr(neg_target_batch, "to_data_list") else neg_target_batch
+        neg_query_graphs = neg_query_batch.to_data_list() if hasattr(neg_query_batch, "to_data_list") else neg_query_batch
 
-        # Return batched graph objects (can be used directly for model input)
-        return (
-            Batch.from_data_list(pos_a) if pos_a else None,
-            Batch.from_data_list(pos_b) if pos_b else None,
-            Batch.from_data_list(neg_a),
-            Batch.from_data_list(neg_b),
-        )
+        # You can now use these as expected
+        # ... continue batching logic ...
+        # For example:
+        pos_a = self.create_subgraph_batch(target_graphs)
+        pos_b = self.create_subgraph_batch(query_graphs)
+        neg_a = self.create_subgraph_batch(neg_target_graphs)
+        neg_b = self.create_subgraph_batch(neg_query_graphs)
+
+        return pos_a, pos_b, neg_a, neg_b
 
 
 
