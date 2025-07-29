@@ -198,32 +198,32 @@ class CustomGraphDataset:
         subgraph = graph.subgraph(subgraph_nodes).copy()
         return subgraph
 
+        
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_training):
-        # Unpack each batch tuple into components
-        pos_query_batch, pos_target_batch, pos_anchors, pos_labels = batch_target
-        neg_query_batch, neg_target_batch, neg_anchors, neg_labels = batch_neg_target
-        query_query_batch, query_target_batch, query_anchors, query_labels = batch_neg_query
+        pos_a, pos_b, neg_a, neg_b = [], [], [], []
 
-        # Example: filter samples where label == 1 if is_training else keep all
-        # (You might want to use masks here on pos_labels, etc.)
+        for pos_sample, neg_sample, query_sample in zip(batch_target, batch_neg_target, batch_neg_query):
+            query_graph = query_sample[0]
+            anchor = query_sample[2]
+            label = query_sample[3]
 
-        # Then build lists of graphs for positives and negatives
-        pos_a = [ ... ]  # list of query graphs for positive pairs
-        pos_b = [ ... ]  # list of target graphs for positive pairs
-        neg_a = [ ... ]  # list of query graphs for negative pairs
-        neg_b = [ ... ]  # list of negative target graphs
+            target_graph = pos_sample[1]
+            neg_graph = neg_sample[1]
 
-        # Usually, pos_a could be query_query_batch graphs, pos_b from pos_target_batch, etc.
-        # The exact logic depends on your task.
+            if is_training and label.item() == 0:
+                continue
 
-        # Finally, return batched graphs (or None if empty)
+            pos_a.append(query_graph)
+            pos_b.append(target_graph)
+            neg_a.append(query_graph)
+            neg_b.append(neg_graph)
+
         return (
             Batch.from_data_list(pos_a) if pos_a else None,
             Batch.from_data_list(pos_b) if pos_b else None,
-            Batch.from_data_list(neg_a) if neg_a else None,
-            Batch.from_data_list(neg_b) if neg_b else None,
+            Batch.from_data_list(neg_a),
+            Batch.from_data_list(neg_b),
         )
-
 
     # Optional: collate_fn if you want to use __getitem__ with DataLoader elsewhere
     @staticmethod
