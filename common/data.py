@@ -201,35 +201,30 @@ class CustomGraphDataset:
         
     
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_train=True):
-        # Handle tuple input: (target, query)
-        if isinstance(batch_target, tuple):
-            target_batch, query_batch = batch_target
-        else:
-            raise TypeError(f"Expected batch_target to be a tuple, got {type(batch_target)}")
+    # Check that batches are deepsnap or torch_geometric batches
+        def extract_pair(batch):
+            try:
+                graphs = batch.to_data_list()  # Deepsnap batch
+            except AttributeError:
+                graphs = batch  # Already a list
+            # Expect each item to have .anchor and .query
+            a_list, b_list = [], []
+            for g in graphs:
+                a_list.append(g.anchor)
+                b_list.append(g.query)
+            return a_list, b_list
 
-        if isinstance(batch_neg_target, tuple):
-            neg_target_batch, neg_query_batch = batch_neg_target
-        else:
-            raise TypeError(f"Expected batch_neg_target to be a tuple, got {type(batch_neg_target)}")
+        pos_a_list, pos_b_list = extract_pair(batch_target)
+        neg_a_list, neg_b_list = extract_pair(batch_neg_target)
 
-        if isinstance(batch_neg_query, tuple):
-            dummy_batch, dummy_query_batch = batch_neg_query
-        else:
-            raise TypeError(f"Expected batch_neg_query to be a tuple, got {type(batch_neg_query)}")
+        # Optional: You can also support separate negative query (if needed)
+        # For now, we ignore batch_neg_query unless you want to use it
 
-        # Convert to lists if needed
-        target_graphs = target_batch.to_data_list() if hasattr(target_batch, "to_data_list") else target_batch
-        query_graphs = query_batch.to_data_list() if hasattr(query_batch, "to_data_list") else query_batch
-        neg_target_graphs = neg_target_batch.to_data_list() if hasattr(neg_target_batch, "to_data_list") else neg_target_batch
-        neg_query_graphs = neg_query_batch.to_data_list() if hasattr(neg_query_batch, "to_data_list") else neg_query_batch
-
-        # You can now use these as expected
-        # ... continue batching logic ...
-        # For example:
-        pos_a = self.create_subgraph_batch(target_graphs)
-        pos_b = self.create_subgraph_batch(query_graphs)
-        neg_a = self.create_subgraph_batch(neg_target_graphs)
-        neg_b = self.create_subgraph_batch(neg_query_graphs)
+        # Wrap with custom batching (no default_collate)
+        pos_a = self.create_subgraph_batch(pos_a_list)
+        pos_b = self.create_subgraph_batch(pos_b_list)
+        neg_a = self.create_subgraph_batch(neg_a_list)
+        neg_b = self.create_subgraph_batch(neg_b_list)
 
         return pos_a, pos_b, neg_a, neg_b
 
