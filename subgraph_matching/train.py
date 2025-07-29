@@ -169,6 +169,7 @@ def train_loop(args):
     test_pts = []
 
     for batch in loader:
+        print("Type of batch from loader:", type(batch))
         pos_a, pos_b, neg_a, neg_b = data_source.gen_batch(batch, None, None, is_train=False)
         if pos_a:
             pos_a = pos_a.to(torch.device("cpu"))

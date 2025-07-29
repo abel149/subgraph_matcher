@@ -184,6 +184,7 @@ class CustomGraphDataset:
 
 
     def gen_batch(self, batch, _, __, is_train):
+        print("Type of batch received in gen_batch:", type(batch))
         augmenter = feature_preprocess.FeatureAugment()
 
         def sample_subgraph(graph, size):
