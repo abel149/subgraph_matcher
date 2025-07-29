@@ -201,35 +201,18 @@ class CustomGraphDataset:
         
     
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_train=True):
-        # Helper to extract anchor and query subgraphs from a batch
-        def extract_pair(batch):
-            try:
-                samples = batch.to_data_list()  # Deepsnap or Pyg batch
-            except AttributeError:
-                samples = batch  # Already a list
+        def unpack_batches(batch_pair):
+            if isinstance(batch_pair, tuple) and len(batch_pair) == 2:
+                return batch_pair[0], batch_pair[1]
+            else:
+                raise ValueError("Expected tuple of (anchor_batch, query_batch).")
 
-            a_list, b_list = [], []
-            for sample in samples:
-                if hasattr(sample, "anchor") and hasattr(sample, "query"):
-                    a_list.append(sample.anchor)
-                    b_list.append(sample.query)
-                else:
-                    raise ValueError("Each sample must have 'anchor' and 'query' attributes.")
-            return a_list, b_list
-
-        # Extract pairs from each batch
-        pos_a_list, pos_b_list = extract_pair(batch_target)
-        neg_a_list, neg_b_list = extract_pair(batch_neg_target)
-        # batch_neg_query is not used for now; include if needed
-
-        # Manually create batches
-        pos_a = self.create_subgraph_batch(pos_a_list)
-        pos_b = self.create_subgraph_batch(pos_b_list)
-        neg_a = self.create_subgraph_batch(neg_a_list)
-        neg_b = self.create_subgraph_batch(neg_b_list)
+        # Unpack each batch pair
+        pos_a, pos_b = unpack_batches(batch_target)
+        neg_a, neg_b = unpack_batches(batch_neg_target)
+        # If needed, handle batch_neg_query here
 
         return pos_a, pos_b, neg_a, neg_b
-
 
 
 
