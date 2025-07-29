@@ -224,16 +224,17 @@ class CustomGraphDataset:
     # Optional: collate_fn if you want to use __getitem__ with DataLoader elsewhere
     @staticmethod
     def my_collate_fn(batch):
-        query_batch = Batch.from_data_list([item['query'] for item in batch])
-        target_batch = Batch.from_data_list([item['target'] for item in batch])
-        anchors = [item['anchor'] for item in batch]
-        labels = torch.tensor([item['label'] for item in batch], dtype=torch.float)
+        query_batch = Batch.from_data_list([item[0] for item in batch])  # query_graph
+        target_batch = Batch.from_data_list([item[1] for item in batch]) # target_graph
+        anchors = [item[2] for item in batch]
+        labels = torch.tensor([item[3] for item in batch], dtype=torch.float)
         return {
             "query_batch": query_batch,
             "target_batch": target_batch,
             "anchors": anchors,
             "labels": labels,
         }
+
 
     def _wrapper_collate_fn(self, batch):
         collated = self.my_collate_fn(batch)
