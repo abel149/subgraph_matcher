@@ -105,18 +105,6 @@ class DataSource:
     def gen_batch(batch_target, batch_neg_target, batch_neg_query, train):
         raise NotImplementedError
 
-# Assuming DSGraph and feature_preprocess.FeatureAugment and utils.get_device() are defined elsewhere
-import random
-import pickle
-import torch
-import networkx as nx
-from torch.utils.data import DataLoader, Dataset
-from torch_geometric.data import Data, Batch
-from common.dsgraph import DSGraph  # Assuming you have this wrapper
-import feature_preprocess  # Your module
-import utils  # For get_device()
-
-
 class CustomGraphDataset:
     def __init__(self, graph_pkl_path, node_anchored=False, num_queries=32, subgraph_hops=1, min_size=5, max_size=29):
         self.graph_pkl_path = graph_pkl_path
