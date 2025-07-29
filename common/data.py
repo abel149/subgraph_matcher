@@ -232,7 +232,7 @@ class CustomGraphDataset:
 
     def gen_batch(self, batch, _, __, is_train):
         def sample_subgraph(graph, size):
-            for _ in range(100):
+            for _ in range(10):
                 start_node = random.choice(list(graph.nodes))  # ✅ FIXED HERE
                 neigh = [start_node]
                 frontier = list(set(graph.neighbors(start_node)) - set(neigh))
@@ -308,9 +308,9 @@ class CustomGraphDataset:
         pos_query = augmenter.augment(pos_query).to(utils.get_device())
         neg_target = augmenter.augment(neg_target).to(utils.get_device())
         neg_query = augmenter.augment(neg_query).to(utils.get_device())
-
+        print(">>> batching finised loop")
         return pos_target, pos_query, neg_target, neg_query
-
+    
 # Make sure SubgraphGenerator class is defined as you had before, or adapt it if needed.
 
 
