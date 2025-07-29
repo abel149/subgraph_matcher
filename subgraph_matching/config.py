@@ -48,7 +48,7 @@ def parse_encoder(parser, arg_str=None):
                         method_type='order',
                         dataset='syn',
                         n_layers=8,
-                        batch_size=64,
+                        batch_size=16,
                         hidden_dim=64,
                         skip="learnable",
                         dropout=0.0,
@@ -64,7 +64,7 @@ def parse_encoder(parser, arg_str=None):
                         n_workers=0,
                         model_path="ckpt/model.pt",
                         tag='',
-                        val_size=4096,
+                        val_size=128,
                         node_anchored=True)
 
     #return enc_parser.parse_args(arg_str)
