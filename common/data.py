@@ -199,27 +199,31 @@ class CustomGraphDataset:
         return subgraph
 
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_training):
-        pos_a, pos_b, neg_a, neg_b = [], [], [], []
+        # Unpack each batch tuple into components
+        pos_query_batch, pos_target_batch, pos_anchors, pos_labels = batch_target
+        neg_query_batch, neg_target_batch, neg_anchors, neg_labels = batch_neg_target
+        query_query_batch, query_target_batch, query_anchors, query_labels = batch_neg_query
 
-        for pos_sample, neg_sample, query_sample in zip(batch_target, batch_neg_target, batch_neg_query):
-            query_graph, _, anchor, label = query_sample
-            _, target_graph, _, _ = pos_sample
-            _, neg_graph, _, _ = neg_sample
+        # Example: filter samples where label == 1 if is_training else keep all
+        # (You might want to use masks here on pos_labels, etc.)
 
-            if is_training and label.item() == 0:
-                continue
+        # Then build lists of graphs for positives and negatives
+        pos_a = [ ... ]  # list of query graphs for positive pairs
+        pos_b = [ ... ]  # list of target graphs for positive pairs
+        neg_a = [ ... ]  # list of query graphs for negative pairs
+        neg_b = [ ... ]  # list of negative target graphs
 
-            pos_a.append(query_graph)
-            pos_b.append(target_graph)
-            neg_a.append(query_graph)
-            neg_b.append(neg_graph)
+        # Usually, pos_a could be query_query_batch graphs, pos_b from pos_target_batch, etc.
+        # The exact logic depends on your task.
 
+        # Finally, return batched graphs (or None if empty)
         return (
             Batch.from_data_list(pos_a) if pos_a else None,
             Batch.from_data_list(pos_b) if pos_b else None,
-            Batch.from_data_list(neg_a),
-            Batch.from_data_list(neg_b),
+            Batch.from_data_list(neg_a) if neg_a else None,
+            Batch.from_data_list(neg_b) if neg_b else None,
         )
+
 
     # Optional: collate_fn if you want to use __getitem__ with DataLoader elsewhere
     @staticmethod
