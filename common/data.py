@@ -222,6 +222,7 @@ class CustomGraphDataset:
         )
 
     # Optional: collate_fn if you want to use __getitem__ with DataLoader elsewhere
+    @staticmethod
     def my_collate_fn(batch):
         query_batch = Batch.from_data_list([item['query'] for item in batch])
         target_batch = Batch.from_data_list([item['target'] for item in batch])
@@ -233,6 +234,11 @@ class CustomGraphDataset:
             "anchors": anchors,
             "labels": labels,
         }
+
+    def _wrapper_collate_fn(self, batch):
+        collated = self.my_collate_fn(batch)
+        return collated["query_batch"], collated["target_batch"], collated["anchors"], collated["labels"]
+
     def gen_data_loaders(self, size=None, batch_size=16, train=True, use_distributed_sampling=False):
         """
         Returns 3 identical DataLoaders to match expected usage:
@@ -248,13 +254,6 @@ class CustomGraphDataset:
         )
 
         return loader, loader, loader  # match zip(*loaders)
-
-    def _wrapper_collate_fn(self, batch):
-        # This will return just query_batch and target_batch for compatibility
-        collated = self.my_collate_fn(batch)
-        return collated["query_batch"], collated["target_batch"], collated["anchors"], collated["labels"]
-
-
 
 class OTFSynDataSource(DataSource):
     """ On-the-fly generated synthetic data for training the subgraph model.
