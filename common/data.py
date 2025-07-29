@@ -17,6 +17,8 @@ from common import combined_syn
 from common import feature_preprocess
 from common import utils
 
+from torch.utils.data import Dataset, DataLoader, DistributedSampler
+
 def load_dataset(name):
     """ Load real-world datasets, available in PyTorch Geometric.
 
@@ -103,27 +105,7 @@ class DataSource:
     def gen_batch(batch_target, batch_neg_target, batch_neg_query, train):
         raise NotImplementedError
 
-import pickle
-import torch
-import random
-import networkx as nx
-from deepsnap.graph import Graph as DSGraph
-from torch.utils.data import Dataset, DataLoader
-import random
-import pickle
-import torch
-import networkx as nx
-from torch.utils.data import Dataset, DataLoader
-from deepsnap.graph import Graph as DSGraph
-from deepsnap.batch import Batch
-
-import random
-import torch
-import networkx as nx
-from torch.utils.data import Dataset, DataLoader
-from deepsnap.graph import Graph as DSGraph, Batch
-import feature_preprocess  # make sure this is imported correctly
-import utils  # for utils.get_device()
+# Assuming DSGraph and feature_preprocess.FeatureAugment and utils.get_device() are defined elsewhere
 
 class CustomGraphDataset:
     def __init__(self, graph_pkl_path, node_anchored=False, num_queries=32, subgraph_hops=1):
@@ -132,10 +114,11 @@ class CustomGraphDataset:
         self.num_queries = num_queries
         self.subgraph_hops = subgraph_hops
 
-        self.query_size = 5  # You can make this configurable if needed
+        self.query_size = 5  # Can be parameterized if needed
         self.raw_data = self._load_graph()
         self.full_graph = self._build_graph()
 
+        # Extract connected components large enough to sample from
         self.connected_components = [
             list(c) for c in nx.connected_components(self.full_graph.G)
             if len(c) >= self.query_size
@@ -156,9 +139,7 @@ class CustomGraphDataset:
         for edge in self.raw_data['edges']:
             if len(edge) == 3:
                 u, v, attr = edge
-                cleaned_attr = {
-                    k: v for k, v in attr.items() if isinstance(v, (int, float))
-                }
+                cleaned_attr = {k: v for k, v in attr.items() if isinstance(v, (int, float))}
                 cleaned_edges.append((u, v, cleaned_attr))
             else:
                 cleaned_edges.append(edge)
@@ -186,24 +167,72 @@ class CustomGraphDataset:
         raise RuntimeError("Failed to generate valid subgraph after multiple retries.")
 
     def graph_collate_fn(self, batch):
-        return batch  # can be replaced by Batch.from_data_list(batch) if needed
+        # Batch individual graphs into a batched graph object
+        return Batch.from_data_list(batch)
 
-    def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
-        dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, val_size)
-        loader = DataLoader(
-            dataset,
+    def gen_data_loaders(self, train_size, val_size, test_size, batch_size, train=True, use_distributed_sampling=False):
+        """
+        Generate train, validation, and test DataLoaders.
+
+        Args:
+            train_size (int): Number of samples in training dataset.
+            val_size (int): Number of samples in validation dataset.
+            test_size (int): Number of samples in test dataset.
+            batch_size (int): Batch size.
+            train (bool): Whether training mode (affects shuffle).
+            use_distributed_sampling (bool): Use DistributedSampler if True.
+
+        Returns:
+            tuple: (train_loader, val_loader, test_loader)
+        """
+
+        train_dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, train_size)
+        val_dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, val_size)
+        test_dataset = SubgraphGenerator(self.full_graph, self.connected_components, self.query_size, test_size)
+
+        train_sampler = DistributedSampler(train_dataset) if use_distributed_sampling else None
+        val_sampler = DistributedSampler(val_dataset) if use_distributed_sampling else None
+        test_sampler = DistributedSampler(test_dataset) if use_distributed_sampling else None
+
+        train_loader = DataLoader(
+            train_dataset,
             batch_size=batch_size,
-            shuffle=train,
-            num_workers=0,
-            collate_fn=self.graph_collate_fn
+            shuffle=(train and train_sampler is None),
+            sampler=train_sampler,
+            collate_fn=self.graph_collate_fn,
+            num_workers=4,
+            pin_memory=True,
+            drop_last=True
         )
-        return (loader, loader, loader)
+
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            sampler=val_sampler,
+            collate_fn=self.graph_collate_fn,
+            num_workers=4,
+            pin_memory=True,
+            drop_last=False
+        )
+
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            sampler=test_sampler,
+            collate_fn=self.graph_collate_fn,
+            num_workers=4,
+            pin_memory=True,
+            drop_last=False
+        )
+
+        return train_loader, val_loader, test_loader
 
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_train):
         def sample_subgraph(graph, offset=0, use_precomp_sizes=False,
                             filter_negs=False, supersample_small_graphs=False,
                             neg_target=None, hard_neg_idxs=None):
-            # You can reuse your _generate_subgraph or the logic here from OTF class
             done = False
             n_tries = 0
             while not done and n_tries < 100:
@@ -267,7 +296,7 @@ class CustomGraphDataset:
                 return g
             neg_target = neg_target.apply_transform(add_anchor)
 
-        # Augment and send to device
+        # Augment features and move to device
         pos_target = augmenter.augment(pos_target).to(utils.get_device())
         pos_query = augmenter.augment(pos_query).to(utils.get_device())
         neg_target = augmenter.augment(neg_target).to(utils.get_device())
@@ -300,6 +329,7 @@ class SubgraphGenerator(Dataset):
                             subG.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
                     return DSGraph(subG)
         raise RuntimeError("Subgraph generation failed.")
+
 
 class OTFSynDataSource(DataSource):
     """ On-the-fly generated synthetic data for training the subgraph model.
