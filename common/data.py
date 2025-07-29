@@ -174,7 +174,7 @@ class CustomGraphDataset:
             dataset,
             batch_size=batch_size,
             shuffle=train,
-            num_workers=4,  # Can now safely use >0
+            num_workers=0,  # Can now safely use >0
             collate_fn=self.graph_collate_fn
         )
         return loader
