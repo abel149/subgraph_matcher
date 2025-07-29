@@ -5,8 +5,6 @@
 HYPERPARAM_SEARCH = False
 HYPERPARAM_SEARCH_N_TRIALS = None   # how many grid search trials to run
                                     #    (set to None for exhaustive search)
-import torch.multiprocessing
-torch.multiprocessing.set_start_method('spawn', force=True)
 
 import argparse
 from itertools import permutations
@@ -41,7 +39,6 @@ else:
     from subgraph_matching.config import parse_encoder
 from subgraph_matching.test import validation
 
-
 def build_model(args):
     # build model
     if args.method_type == "order":
@@ -53,7 +50,6 @@ def build_model(args):
         model.load_state_dict(torch.load(args.model_path,
             map_location=utils.get_device()))
     return model
-
 
 def make_data_source(args):
     toks = args.dataset.split("-")
@@ -144,9 +140,6 @@ def train(args, model, logger, in_queue, out_queue):
             out_queue.put(("step", (loss.item(), acc)))
 
 def train_loop(args):
-    import torch.multiprocessing as mp
-   # mp.set_start_method('spawn', force=True)
-    #torch.multiprocessing.set_sharing_strategy('file_system')
     if not os.path.exists(os.path.dirname(args.model_path)):
         os.makedirs(os.path.dirname(args.model_path))
     if not os.path.exists("plots/"):
@@ -215,9 +208,7 @@ def train_loop(args):
         worker.join()
 
 def main(force_test=False):
-    
-    mp.set_start_method('spawn', force=True)
- 
+    mp.set_start_method("spawn", force=True)
     parser = (argparse.ArgumentParser(description='Order embedding arguments')
         if not HYPERPARAM_SEARCH else
         HyperOptArgumentParser(strategy='grid_search'))
@@ -241,5 +232,4 @@ def main(force_test=False):
         train_loop(args)
 
 if __name__ == '__main__':
-    mp.set_start_method('fork', force=True)
     main()
