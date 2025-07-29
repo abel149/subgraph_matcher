@@ -167,20 +167,21 @@ class CustomGraphDataset:
         raise RuntimeError("Failed to generate valid subgraph.")
 
  
-
-    def graph_collate_fn(self, batch):
-       return DSBatch(batch)  # ✅ this is DeepSnap's Batch, not PyG's
-
-
     def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
         dataset = SubgraphGenerator(self.full_graph.G, self.connected_components, self.query_size, val_size)
+        
+        def dsgraph_collate_fn(batch):
+            return Batch.collate(batch)  # DeepSnap collate
+
         loader = DataLoader(
             dataset,
             batch_size=batch_size,
             shuffle=train,
-            num_workers=0,  # Can now safely use >0
+            num_workers=0,
+            collate_fn=dsgraph_collate_fn
         )
         return loader
+
 
     def gen_batch(self, batch, _, __, is_train):
         augmenter = feature_preprocess.FeatureAugment()
