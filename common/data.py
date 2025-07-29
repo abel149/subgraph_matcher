@@ -4,6 +4,7 @@ import random
 
 from deepsnap.graph import Graph as DSGraph
 from deepsnap.batch import Batch
+from deepsnap.batch import Batch as DSBatch
 from deepsnap.dataset import GraphDataset
 import networkx as nx
 import numpy as np
@@ -165,8 +166,11 @@ class CustomGraphDataset:
                     return DSGraph(subG)
         raise RuntimeError("Failed to generate valid subgraph.")
 
+ 
+
     def graph_collate_fn(self, batch):
-        return Batch.from_data_list(batch)
+       return DSBatch(batch)  # ✅ this is DeepSnap's Batch, not PyG's
+
 
     def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
         dataset = SubgraphGenerator(self.full_graph.G, self.connected_components, self.query_size, val_size)
@@ -175,7 +179,6 @@ class CustomGraphDataset:
             batch_size=batch_size,
             shuffle=train,
             num_workers=0,  # Can now safely use >0
-            collate_fn=self.graph_collate_fn
         )
         return loader
 
