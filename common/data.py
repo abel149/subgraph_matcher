@@ -168,11 +168,13 @@ class CustomGraphDataset:
 
  
     def gen_data_loaders(self, val_size, batch_size, train=True, use_distributed_sampling=False):
+        # Create dataset only once (since your case is disk-based single graph)
         dataset = SubgraphGenerator(self.full_graph.G, self.connected_components, self.query_size, val_size)
-        
+
         def dsgraph_collate_fn(batch):
             return Batch.collate(batch)  # DeepSnap collate
 
+        # Create a single DataLoader
         loader = DataLoader(
             dataset,
             batch_size=batch_size,
@@ -180,7 +182,12 @@ class CustomGraphDataset:
             num_workers=0,
             collate_fn=dsgraph_collate_fn
         )
-        return loader
+
+        # Now repeat this loader 3 times like OTF loader expects:
+        # batch_target, batch_neg_target, batch_neg_query
+        # NOTE: All three point to the same loader in your case
+        return [loader, loader, loader]
+
 
 
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
