@@ -183,8 +183,8 @@ class CustomGraphDataset:
 
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, is_train):
         def sample_subgraph(graph, offset=0, use_precomp_sizes=False,
-                            filter_negs=False, supersample_small_graphs=False,
-                            neg_target=None, hard_neg_idxs=None):
+                    filter_negs=False, supersample_small_graphs=False,
+                    neg_target=None, hard_neg_idxs=None):
             done = False
             n_tries = 0
             while not done and n_tries < 100:
@@ -202,7 +202,13 @@ class CustomGraphDataset:
                     visited.add(new_node)
                     frontier += list(set(graph.G.neighbors(new_node)) - visited)
                     frontier = list(set(frontier))
+
                 subgraph = graph.G.subgraph(neigh).copy()
+
+                # === ADD THIS CHECK ===
+                if subgraph.number_of_edges() == 0:
+                    continue  # Retry sampling, invalid subgraph
+                # ======================
 
                 if self.node_anchored:
                     anchor = neigh[0]
