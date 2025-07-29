@@ -203,13 +203,16 @@ class CustomGraphDataset:
         pos_a, pos_b, neg_a, neg_b = [], [], [], []
 
         for pos_sample, neg_sample, query_sample in zip(batch_target, batch_neg_target, batch_neg_query):
-            query_graph = query_sample[0]
-            anchor = query_sample[2]
-            label = query_sample[3]
+            print("query_sample type:", type(query_sample))
+            print("query_sample:", query_sample)
 
-            target_graph = pos_sample[1]
-            neg_graph = neg_sample[1]
+            query_graph = query_sample  # DeepSnap Graph
+            target_graph = pos_sample
+            neg_graph = neg_sample
 
+            label = query_graph.node_label  # Or whatever attribute stores the label
+
+            # If label is a tensor (e.g., tensor([0])), get scalar with `.item()`
             if is_training and label.item() == 0:
                 continue
 
