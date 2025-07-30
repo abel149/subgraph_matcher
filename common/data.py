@@ -153,52 +153,6 @@ class CustomGraphDataset:
                 G.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
 
         return DSGraph(G)
-
-    def __len__(self):
-        # Arbitrary large number for sampling purposes
-        return 100000
-
-    def __getitem__(self, idx):
-        while True:
-            node = random.choice(self.nodes)
-            neighbors = nx.single_source_shortest_path_length(self.graph, node, cutoff=self.radius)
-            subgraph_nodes = list(neighbors.keys())
-            subgraph = self.graph.subgraph(subgraph_nodes)
-
-            # Only continue if query subgraph is valid
-            if subgraph.number_of_edges() > 0 and subgraph.number_of_nodes() >= self.query_size:
-                break
-
-        query_graph = DSGraph(subgraph)
-
-        # Retry until target subgraph has at least one edge
-        while True:
-            component = random.choice(self.connected_components)
-            if len(component) < self.query_size:
-                continue  # skip small components
-
-            component_nodes = random.sample(component, self.query_size)
-            target_subgraph = self.graph.subgraph(component_nodes)
-
-            if target_subgraph.number_of_edges() > 0:
-                break
-
-        target_graph = DSGraph(target_subgraph)
-
-        anchors = torch.tensor([node], dtype=torch.long)
-        label = torch.tensor([1], dtype=torch.float)
-
-        return query_graph, target_graph, anchors, label
-
-
-
-    def sample_subgraph(self, graph, anchor):
-        sub_nodes = nx.single_source_shortest_path_length(graph, anchor, cutoff=self.radius)
-        subgraph_nodes = list(sub_nodes.keys())
-        subgraph = graph.subgraph(subgraph_nodes).copy()
-        return subgraph
-
-        
     
     def gen_batch(self, batch_target, batch_neg_target, batch_neg_query, train):
         def sample_subgraph(graph, offset=0, use_precomp_sizes=False,
@@ -333,7 +287,7 @@ class CustomGraphDataset:
         Returns 3 identical DataLoaders to match expected usage:
         for batch_target, batch_neg_target, batch_neg_query in zip(*loaders)
         """
-        dataset = self  # use self as dataset directly since __getitem__ is defined
+        dataset = self.full_graph  # use self as dataset directly since __getitem__ is defined
 
         loader = DataLoader(
             dataset,
