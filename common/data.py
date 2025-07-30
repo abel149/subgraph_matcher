@@ -194,7 +194,8 @@ class CustomGraphDataset:
             g.nodes[v]["node_feature"] = (torch.ones(1) if anchor == v else torch.zeros(1))
         return g
 
-    def gen_batch(self, batch_size, train=True, **kwargs):
+    def gen_batch(self, batch_size, *args, train=True, **kwargs):
+
         """
         Generate a batch of positive and negative graph pairs
         Returns:
