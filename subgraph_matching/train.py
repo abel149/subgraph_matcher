@@ -91,10 +91,10 @@ def train(args, model, logger, in_queue, out_queue):
     scheduler, opt = utils.build_optimizer(args, model.parameters())
     if args.method_type == "order":
         clf_opt = optim.Adam(model.clf_model.parameters(), lr=args.lr)
-
+    data_source = make_data_source(args)
     done = False
     while not done:
-        data_source = make_data_source(args)
+        
         loaders = data_source.gen_data_loaders(args.eval_interval *
             args.batch_size, args.batch_size, train=True)
         for batch_target, batch_neg_target, batch_neg_query in zip(*loaders):
@@ -181,7 +181,7 @@ def train_loop(args):
 
     workers = []
     for i in range(args.n_workers):
-        worker = mp.Process(target=train, args=(args, model, data_source,
+        worker = mp.Process(target=train, args=(args, model,
             in_queue, out_queue))
         worker.start()
         workers.append(worker)
