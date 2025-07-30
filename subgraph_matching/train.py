@@ -80,7 +80,7 @@ def make_data_source(args):
             raise Exception("Error: unrecognized dataset")
     return data_source
 
-def train(args, model, logger, in_queue, out_queue):
+def train(args, model,in_queue, out_queue):
     """Train the order embedding model.
 
     args: Commandline arguments
