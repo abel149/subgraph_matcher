@@ -194,58 +194,77 @@ class CustomGraphDataset:
             g.nodes[v]["node_feature"] = (torch.ones(1) if anchor == v else torch.zeros(1))
         return g
 
-    def gen_batch(self, batch_size, *_args, train=True, **kwargs):
+    def gen_batch(self, batch_size, train=True, **kwargs):
+        """
+        Generate a batch of positive and negative graph pairs
+        Returns:
+            pos_a: Batch of anchor graphs (DSGraph Batch)
+            pos_b: Batch of positive graphs (DSGraph Batch)
+            neg_a: Batch of negative anchor graphs (DSGraph Batch)
+            neg_b: Batch of negative graphs (DSGraph Batch)
+        """
+        pos_a, pos_b, neg_a, neg_b = [], [], [], []
         tries = 0
-        max_tries = 20
-        while tries < max_tries:
-            pos_a, pos_b, neg_a, neg_b = [], [], [], []
-            for _ in range(batch_size // 2):
-                size_a = random.randint(self.min_size + 1, self.max_size)
-                size_b = random.randint(self.min_size, size_a - 1)
-                sub_a = self._bfs_sample_subgraph(self.graph, size_a)
-                sub_b = self._bfs_sample_subgraph(sub_a, size_b)
-                sub_b = self._sanitize_edge_attrs(sub_b)
-
-                if sub_a.number_of_edges() == 0 or sub_b.number_of_edges() == 0:
-                    continue
+        max_tries = 20  # Prevent infinite loops
+        
+        # Generate positive pairs (nested subgraphs from same graph)
+        while len(pos_a) < batch_size // 2 and tries < max_tries:
+            size_a = random.randint(self.min_size + 1, self.max_size)
+            size_b = random.randint(self.min_size, size_a - 1)
+            
+            # Sample subgraphs
+            sub_a = self._bfs_sample_subgraph(self.graph, size_a)
+            sub_b = self._bfs_sample_subgraph(sub_a, size_b)
+            
+            # Validate subgraphs
+            if sub_a.number_of_edges() > 0 and sub_b.number_of_edges() > 0:
+                # Handle node anchoring if needed
                 if self.node_anchored:
                     anchor = random.choice(list(sub_a.nodes))
                     sub_a = self._add_anchor(sub_a, anchor)
-                    sub_b = self._add_anchor(sub_b, anchor if anchor in sub_b.nodes else random.choice(list(sub_b.nodes)))
-                pos_a.append(sub_a)
-                pos_b.append(sub_b)
-
-            for _ in range(batch_size // 2):
-                size_a = random.randint(self.min_size + 1, self.max_size)
-                size_b = random.randint(self.min_size, self.max_size)
-                sub_a = self._bfs_sample_subgraph(self.graph, size_a)
-                sub_b = self._bfs_sample_subgraph(self.graph, size_b)
-                if sub_a.number_of_edges() == 0 or sub_b.number_of_edges() == 0:
-                    continue
-                if nx.is_isomorphic(sub_a, sub_b):
-                    continue
-                if self.node_anchored:
-                    anchor_a = random.choice(list(sub_a.nodes))
-                    anchor_b = random.choice(list(sub_b.nodes))
-                    sub_a = self._add_anchor(sub_a, anchor_a)
-                    sub_b = self._add_anchor(sub_b, anchor_b)
-                neg_a.append(sub_a)
-                neg_b.append(sub_b)
-
-            if pos_a and pos_b and neg_a and neg_b:
-                break
+                    sub_b = self._add_anchor(sub_b, anchor if anchor in sub_b.nodes else None)
+                
+                # Convert to DSGraph before adding to batch
+                pos_a.append(DSGraph(sub_a))
+                pos_b.append(DSGraph(sub_b))
             tries += 1
-
+        
+        tries = 0
+        # Generate negative pairs (subgraphs from different parts of graph)
+        while len(neg_a) < batch_size // 2 and tries < max_tries:
+            size_a = random.randint(self.min_size, self.max_size)
+            size_b = random.randint(self.min_size, self.max_size)
+            
+            # Sample independent subgraphs
+            sub_a = self._bfs_sample_subgraph(self.graph, size_a)
+            sub_b = self._bfs_sample_subgraph(self.graph, size_b)
+            
+            # Validate and ensure they're different
+            if (sub_a.number_of_edges() > 0 and 
+                sub_b.number_of_edges() > 0 and 
+                not nx.is_isomorphic(sub_a, sub_b)):
+                
+                if self.node_anchored:
+                    sub_a = self._add_anchor(sub_a)
+                    sub_b = self._add_anchor(sub_b)
+                
+                neg_a.append(DSGraph(sub_a))
+                neg_b.append(DSGraph(sub_b))
+            tries += 1
+        
+        # Verify we got enough samples
         if not (pos_a and pos_b and neg_a and neg_b):
-            raise RuntimeError("Could not generate a non-empty batch after {} tries.".format(max_tries))
-
+            raise RuntimeError(
+                f"Failed to generate valid batch after {max_tries} tries. "
+                f"Got {len(pos_a)}/{batch_size//2} positive and "
+                f"{len(neg_a)}/{batch_size//2} negative pairs."
+            )
+        
         # Convert to DeepSNAP batches
-        pos_a = Batch.from_data_list([DSGraph(g) for g in pos_a])
-        pos_b = Batch.from_data_list([DSGraph(g) for g in pos_b])
-        neg_a = Batch.from_data_list([DSGraph(g) for g in neg_a])
-        neg_b = Batch.from_data_list([DSGraph(g) for g in neg_b])
-        return pos_a, pos_b, neg_a, neg_b
-
+        def _make_batch(graph_list):
+            return Batch.from_data_list(graph_list)
+        
+        return _make_batch(pos_a), _make_batch(pos_b), _make_batch(neg_a), _make_batch(neg_b)
     def gen_data_loaders(self, size, batch_size, train=True, use_distributed_sampling=False):
         """
         Returns three loaders (lists of batch sizes) for compatibility with the training loop.
