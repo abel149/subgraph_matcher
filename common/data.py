@@ -143,20 +143,6 @@ class CustomGraphDataset:
                 G.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
 
         return DSGraph(G)
-    
-    def _sample_subgraph(self, graph, size, max_tries=10):
-        for _ in range(max_tries):
-            nodes = random.sample(list(graph.nodes), min(size, len(graph.nodes)))
-            subg = graph.subgraph(nodes).copy()
-            if subg.number_of_edges() > 0:
-                return subg
-        # If after max_tries still no edges, return the largest connected component
-        if subg.number_of_edges() == 0 and subg.number_of_nodes() > 1:
-            components = list(nx.connected_components(subg))
-            if components:
-                largest_cc = max(components, key=len)
-                subg = subg.subgraph(largest_cc).copy()
-        return subg
 
     def _bfs_sample_subgraph(self, graph, size, max_tries=10):
         """
