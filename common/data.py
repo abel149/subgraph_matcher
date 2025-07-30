@@ -176,7 +176,7 @@ class CustomGraphDataset:
                     visited.add(neighbor)
                     queue.append(neighbor)
             subg = graph.subgraph(visited).copy()
-            subg = self._sanitize_edge_attrs(subg)
+           
             if subg.number_of_edges() > 0 and nx.is_connected(subg):
                 return subg
         # fallback: largest connected component
