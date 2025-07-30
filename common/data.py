@@ -160,7 +160,7 @@ class CustomGraphDataset:
 
     def _bfs_sample_subgraph(self, graph, size, max_tries=10):
         """
-        Sample a connected subgraph of given size using BFS.
+        Sample a connected subgraph of given size using BFS .
         """
         for _ in range(max_tries):
             start_node = random.choice(list(graph.nodes))
