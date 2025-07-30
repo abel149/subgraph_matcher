@@ -118,7 +118,7 @@ class CustomGraphDataset:
        
         self.raw_data = self._load_graph()
         self.full_graph = self._build_graph()
-        self.graph = self.full_graph
+        self.graph = self.full_graph.G
       
     def _load_graph(self):
         with open(self.graph_pkl_path, 'rb') as f:
