@@ -134,29 +134,32 @@ class CustomGraphDataset:
             return pickle.load(f)
 
     def _build_graph(self):
-        # Case 1: raw_data is already a NetworkX graph (Graph or DiGraph)
-        if isinstance(self.raw_data, nx.Graph):
-            G = self.raw_data.copy()
-        # Case 2: raw_data is a dict with 'nodes' and 'edges'
+        if isinstance(self.raw_data, nx.Graph) or isinstance(self.raw_data, nx.DiGraph):
+            G = self.raw_data
         elif isinstance(self.raw_data, dict) and 'nodes' in self.raw_data and 'edges' in self.raw_data:
-            G = nx.DiGraph() if self.directed else nx.Graph()
+            # Use directed or undirected based on self.directed if provided
+            G = nx.DiGraph() if getattr(self, 'directed', False) else nx.Graph()
             G.add_nodes_from(self.raw_data['nodes'])
-            G.add_edges_from(self.raw_data['edges'])
+
+            cleaned_edges = []
+            for edge in self.raw_data['edges']:
+                if len(edge) == 3:
+                    u, v, attr = edge
+                    cleaned_attr = {k: v for k, v in attr.items() if isinstance(v, (int, float))}
+                    cleaned_edges.append((u, v, cleaned_attr))
+                else:
+                    cleaned_edges.append(edge)
+            G.add_edges_from(cleaned_edges)
         else:
-            raise ValueError("Unsupported graph format in pickle file.")
+            raise ValueError("Unsupported raw_data format in _build_graph")
 
-        # Ensure directionality matches user request
-        if self.directed and not G.is_directed():
-            G = G.to_directed()
-        elif not self.directed and G.is_directed():
-            G = G.to_undirected()
-
-        # Add dummy node features if missing
+        # Ensure every node has a 'node_feature'
         for node in G.nodes():
             if 'node_feature' not in G.nodes[node]:
                 G.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
 
         return DSGraph(G)
+
 
     def _bfs_sample_subgraph(self, graph, size, max_tries=10):
         """
