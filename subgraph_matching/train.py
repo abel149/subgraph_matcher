@@ -68,7 +68,7 @@ def make_data_source(args):
             node_anchored=args.node_anchored,
             num_queries=args.num_queries if hasattr(args, "num_queries") else 32,
             subgraph_hops=args.subgraph_hops if hasattr(args, "subgraph_hops") else 1,
-            directed=True
+           
         )
     else:
         if len(toks) == 1 or toks[1] == "balanced":

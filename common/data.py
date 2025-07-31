@@ -106,16 +106,8 @@ class DataSource:
     def gen_batch(batch_target, batch_neg_target, batch_neg_query, train):
         raise NotImplementedError
 
-import pickle
-import random
-import networkx as nx
-import torch
-from deepsnap.graph import Graph as DSGraph
-from torch_geometric.data import Batch
-
 class CustomGraphDataset:
-    def __init__(self, graph_pkl_path, node_anchored=False, num_queries=32,
-                 subgraph_hops=1, min_size=5, max_size=29, directed=False):
+    def __init__(self, graph_pkl_path, node_anchored=False, num_queries=32, subgraph_hops=1, min_size=5, max_size=29):
         self.graph_pkl_path = graph_pkl_path
         self.node_anchored = node_anchored
         self.num_queries = num_queries
@@ -123,82 +115,59 @@ class CustomGraphDataset:
         self.min_size = min_size
         self.max_size = max_size
         self.query_size = 5
-        self.directed = directed  # New parameter to control graph directionality
-
+       
         self.raw_data = self._load_graph()
         self.full_graph = self._build_graph()
-        self.graph = self.full_graph.G  # The actual NetworkX graph (possibly directed)
-
+        self.graph = self.full_graph.G
+      
     def _load_graph(self):
         with open(self.graph_pkl_path, 'rb') as f:
             return pickle.load(f)
 
     def _build_graph(self):
-        if isinstance(self.raw_data, nx.Graph) or isinstance(self.raw_data, nx.DiGraph):
-            G = self.raw_data
-        elif isinstance(self.raw_data, dict) and 'nodes' in self.raw_data and 'edges' in self.raw_data:
-            # Use directed or undirected based on self.directed if provided
-            G = nx.DiGraph() if getattr(self, 'directed', False) else nx.Graph()
-            G.add_nodes_from(self.raw_data['nodes'])
+        G = nx.Graph()
+        G.add_nodes_from(self.raw_data['nodes'])
 
-            cleaned_edges = []
-            for edge in self.raw_data['edges']:
-                if len(edge) == 3:
-                    u, v, attr = edge
-                    cleaned_attr = {k: v for k, v in attr.items() if isinstance(v, (int, float))}
-                    cleaned_edges.append((u, v, cleaned_attr))
-                else:
-                    cleaned_edges.append(edge)
-            G.add_edges_from(cleaned_edges)
-        else:
-            raise ValueError("Unsupported raw_data format in _build_graph")
+        cleaned_edges = []
+        for edge in self.raw_data['edges']:
+            if len(edge) == 3:
+                u, v, attr = edge
+                cleaned_attr = {k: v for k, v in attr.items() if isinstance(v, (int, float))}
+                cleaned_edges.append((u, v, cleaned_attr))
+            else:
+                cleaned_edges.append(edge)
+        G.add_edges_from(cleaned_edges)
 
-        # Ensure every node has a 'node_feature'
         for node in G.nodes():
             if 'node_feature' not in G.nodes[node]:
                 G.nodes[node]['node_feature'] = torch.tensor([1.0], dtype=torch.float)
 
         return DSGraph(G)
 
-
     def _bfs_sample_subgraph(self, graph, size, max_tries=10):
         """
-        Sample a connected subgraph of given size using BFS.
-        Supports both directed and undirected graphs.
+        Sample a connected subgraph of given size using BFS .
         """
         for _ in range(max_tries):
             start_node = random.choice(list(graph.nodes))
             visited = {start_node}
             queue = [start_node]
-
             while queue and len(visited) < size:
                 current = queue.pop(0)
-                if self.directed:
-                    neighbors = set(graph.successors(current)) | set(graph.predecessors(current))
-                else:
-                    neighbors = set(graph.neighbors(current))
-                neighbors = neighbors - visited
-                neighbors = list(neighbors)
+                neighbors = list(set(graph.neighbors(current)) - visited)
                 random.shuffle(neighbors)
                 for neighbor in neighbors:
                     if len(visited) >= size:
                         break
                     visited.add(neighbor)
                     queue.append(neighbor)
-
             subg = graph.subgraph(visited).copy()
-
-            is_connected = nx.is_weakly_connected(subg) if self.directed else nx.is_connected(subg)
-            if subg.number_of_edges() > 0 and is_connected:
+           
+            if subg.number_of_edges() > 0 and nx.is_connected(subg):
                 return subg
-
-        # fallback: return largest (weakly) connected component
+        # fallback: largest connected component
         if subg.number_of_edges() == 0 and subg.number_of_nodes() > 1:
-            components = (
-                nx.weakly_connected_components(subg) if self.directed
-                else nx.connected_components(subg)
-            )
-            components = list(components)
+            components = list(nx.connected_components(subg))
             if components:
                 largest_cc = max(components, key=len)
                 subg = subg.subgraph(largest_cc).copy()
@@ -212,8 +181,9 @@ class CustomGraphDataset:
         return g
 
     def gen_batch(self, batch_size, *args, train=True, **kwargs):
+
         """
-        Generate a batch of positive and negative graph pairs.
+        Generate a batch of positive and negative graph pairs
         Returns:
             pos_a: Batch of anchor graphs (DSGraph Batch)
             pos_b: Batch of positive graphs (DSGraph Batch)
@@ -222,66 +192,76 @@ class CustomGraphDataset:
         """
         pos_a, pos_b, neg_a, neg_b = [], [], [], []
         tries = 0
-        max_tries = 20
-
-        # Positive pairs: nested subgraphs from same area
+        max_tries = 20  # Prevent infinite loops
+        
+        # Generate positive pairs (nested subgraphs from same graph)
         while len(pos_a) < batch_size // 2 and tries < max_tries:
             size_a = random.randint(self.min_size + 1, self.max_size)
             size_b = random.randint(self.min_size, size_a - 1)
-
+            
+            # Sample subgraphs
             sub_a = self._bfs_sample_subgraph(self.graph, size_a)
             sub_b = self._bfs_sample_subgraph(sub_a, size_b)
-
+            
+            # Validate subgraphs
             if sub_a.number_of_edges() > 0 and sub_b.number_of_edges() > 0:
+                # Handle node anchoring if needed
                 if self.node_anchored:
                     anchor = random.choice(list(sub_a.nodes))
                     sub_a = self._add_anchor(sub_a, anchor)
                     sub_b = self._add_anchor(sub_b, anchor if anchor in sub_b.nodes else None)
+                
+                # Convert to DSGraph before adding to batch
                 pos_a.append(DSGraph(sub_a))
                 pos_b.append(DSGraph(sub_b))
             tries += 1
-
+        
         tries = 0
-        # Negative pairs: two random subgraphs
+        # Generate negative pairs (subgraphs from different parts of graph)
         while len(neg_a) < batch_size // 2 and tries < max_tries:
             size_a = random.randint(self.min_size, self.max_size)
             size_b = random.randint(self.min_size, self.max_size)
-
+            
+            # Sample independent subgraphs
             sub_a = self._bfs_sample_subgraph(self.graph, size_a)
             sub_b = self._bfs_sample_subgraph(self.graph, size_b)
-
+            
+            # Validate and ensure they're different
             if (sub_a.number_of_edges() > 0 and 
                 sub_b.number_of_edges() > 0 and 
                 not nx.is_isomorphic(sub_a, sub_b)):
+                
                 if self.node_anchored:
                     sub_a = self._add_anchor(sub_a)
                     sub_b = self._add_anchor(sub_b)
+                
                 neg_a.append(DSGraph(sub_a))
                 neg_b.append(DSGraph(sub_b))
             tries += 1
-
+        
+        # Verify we got enough samples
         if not (pos_a and pos_b and neg_a and neg_b):
             raise RuntimeError(
                 f"Failed to generate valid batch after {max_tries} tries. "
                 f"Got {len(pos_a)}/{batch_size//2} positive and "
                 f"{len(neg_a)}/{batch_size//2} negative pairs."
             )
-
+        
+        # Convert to DeepSNAP batches
         def _make_batch(graph_list):
             return Batch.from_data_list(graph_list)
-
+        
         return _make_batch(pos_a), _make_batch(pos_b), _make_batch(neg_a), _make_batch(neg_b)
-
     def gen_data_loaders(self, size, batch_size, train=True, use_distributed_sampling=False):
         """
         Returns three loaders (lists of batch sizes) for compatibility with the training loop.
         This matches the interface of DiskDataSource and OTFSynDataSource.
         """
         num_batches = size // batch_size
+        # Each loader is a list of batch sizes, as expected by the training loop.
         loaders = [[batch_size] * num_batches for _ in range(3)]
-        return loaders
-
-
+        return loaders    
+    
 class OTFSynDataSource(DataSource):
     """ On-the-fly generated synthetic data for training the subgraph model.
 
